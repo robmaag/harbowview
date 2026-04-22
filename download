@@ -1,0 +1,64 @@
+// routes/payments.js — Payment processing & history
+const router = require('express').Router();
+const db     = require('../database/db');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
+
+// GET /api/payments — payment history
+router.get('/', requireAuth, async (req, res) => {
+  try {
+    let sql = `SELECT p.*, i.invoice_type, i.description, i.due_date, u.unit_number
+               FROM payments p
+               JOIN invoices i ON p.invoice_id = i.id
+               JOIN leases  l ON i.lease_id    = l.id
+               JOIN units   u ON l.unit_id     = u.id
+               WHERE 1=1`;
+    const params = [];
+    if (req.user.role !== 'admin') { sql += ' AND p.tenant_id = ?'; params.push(req.user.id); }
+    sql += ' ORDER BY p.created_at DESC';
+    const [rows] = await db.query(sql, params);
+    res.json({ success: true, payments: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/payments — process a payment
+router.post('/', requireAuth, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { invoice_id, payment_method, amount, last4, transaction_id, gateway_response } = req.body;
+
+    // Verify invoice belongs to tenant (unless admin)
+    const [inv] = await conn.query('SELECT * FROM invoices WHERE id=?', [invoice_id]);
+    if (!inv.length) throw new Error('Invoice not found');
+    if (req.user.role !== 'admin' && inv[0].tenant_id !== req.user.id)
+      throw new Error('Unauthorized');
+
+    // Insert payment record
+    const [result] = await conn.query(
+      `INSERT INTO payments (invoice_id,tenant_id,amount,payment_method,transaction_id,last4,status,paid_at,gateway_response)
+       VALUES (?,?,?,?,?,?,'completed',NOW(),?)`,
+      [invoice_id, inv[0].tenant_id, amount, payment_method,
+       transaction_id || `HV-${Date.now()}`, last4 || null,
+       gateway_response ? JSON.stringify(gateway_response) : null]
+    );
+
+    // Mark invoice as paid
+    await conn.query("UPDATE invoices SET status='paid' WHERE id=?", [invoice_id]);
+    await conn.commit();
+
+    res.status(201).json({
+      success: true,
+      payment_id: result.insertId,
+      confirmation: `HV-PAY-${String(result.insertId).padStart(4,'0')}`
+    });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+module.exports = router;

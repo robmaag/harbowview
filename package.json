@@ -1,0 +1,117 @@
+// routes/units.js — Apartment listings + photo management
+const router  = require('express').Router();
+const db      = require('../database/db');
+const path    = require('path');
+const fs      = require('fs');
+const multer  = require('multer');
+const { v4: uuidv4 } = require('uuid');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
+
+// Multer setup inline
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', 'uploads', 'units');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${uuidv4()}${ext}`);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+
+// GET /api/units — public listing
+router.get('/', async (req, res) => {
+  try {
+    const { status, bedrooms, max_rent } = req.query;
+    let sql = `SELECT u.*, 
+      (SELECT filepath FROM unit_photos WHERE unit_id = u.id AND is_primary = 1 LIMIT 1) AS primary_photo,
+      (SELECT COUNT(*) FROM unit_photos WHERE unit_id = u.id) AS photo_count
+      FROM units u WHERE 1=1`;
+    const params = [];
+    if (status)    { sql += ' AND u.status = ?';        params.push(status); }
+    if (bedrooms !== undefined) { sql += ' AND u.bedrooms = ?'; params.push(bedrooms); }
+    if (max_rent)  { sql += ' AND u.monthly_rent <= ?'; params.push(max_rent); }
+    sql += ' ORDER BY u.monthly_rent ASC';
+    const [rows] = await db.query(sql, params);
+    // Parse JSON amenities
+    rows.forEach(r => { try { r.amenities = JSON.parse(r.amenities); } catch {} });
+    res.json({ success: true, units: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/units/:id
+router.get('/:id', async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM units WHERE id = ?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
+    const unit = rows[0];
+    try { unit.amenities = JSON.parse(unit.amenities); } catch {}
+    const [photos] = await db.query(
+      'SELECT * FROM unit_photos WHERE unit_id = ? ORDER BY sort_order ASC, is_primary DESC',
+      [req.params.id]
+    );
+    res.json({ success: true, unit, photos });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/units/:id/photos — admin uploads photos
+router.post('/:id/photos', requireAuth, requireAdmin,
+  upload.array('photos', 20), async (req, res) => {
+    try {
+      const unitId = req.params.id;
+      const [existing] = await db.query('SELECT COUNT(*) as cnt FROM unit_photos WHERE unit_id=?', [unitId]);
+      const isPrimaryFirst = existing[0].cnt === 0;
+      const inserts = req.files.map((f, i) => [
+        unitId, f.filename, `/uploads/units/${f.filename}`,
+        req.body[`caption_${i}`] || null, i,
+        isPrimaryFirst && i === 0 ? 1 : 0
+      ]);
+      await db.query(
+        'INSERT INTO unit_photos (unit_id,filename,filepath,caption,sort_order,is_primary) VALUES ?',
+        [inserts]
+      );
+      res.json({ success: true, message: `${req.files.length} photos uploaded`, count: req.files.length });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// DELETE /api/units/photos/:photoId
+router.delete('/photos/:photoId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM unit_photos WHERE id=?', [req.params.photoId]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Photo not found' });
+    const fullPath = path.join(__dirname, '..', rows[0].filepath);
+    if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+    await db.query('DELETE FROM unit_photos WHERE id=?', [req.params.photoId]);
+    res.json({ success: true, message: 'Photo deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /api/units/:id — admin update unit
+router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { unit_number, building_name, floor, bedrooms, bathrooms, sqft,
+            monthly_rent, deposit, description, amenities, status } = req.body;
+    await db.query(
+      `UPDATE units SET unit_number=?,building_name=?,floor=?,bedrooms=?,bathrooms=?,
+       sqft=?,monthly_rent=?,deposit=?,description=?,amenities=?,status=? WHERE id=?`,
+      [unit_number, building_name, floor, bedrooms, bathrooms, sqft,
+       monthly_rent, deposit, description, JSON.stringify(amenities), status, req.params.id]
+    );
+    res.json({ success: true, message: 'Unit updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+module.exports = router;
