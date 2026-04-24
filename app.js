@@ -587,3 +587,92 @@ app.get('/api/admin/reports/revenue', authMiddleware, adminOnly, async (req, res
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('🏢 Harborview running on port ' + PORT));
 module.exports = app;
+
+// ══════════════════════════════════════════════════════════════
+// SMS REMINDERS — Twilio
+// ══════════════════════════════════════════════════════════════
+async function sendSMS(to, message) {
+  try {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken  = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+    if (!accountSid || !authToken || !fromNumber) {
+      console.log('⚠️ Twilio not configured — SMS skipped');
+      return null;
+    }
+    const credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ To: to, From: fromNumber, Body: message }).toString()
+      }
+    );
+    const data = await response.json();
+    console.log('✅ SMS sent:', data.sid);
+    return data;
+  } catch (e) {
+    console.error('❌ SMS error:', e.message);
+    return null;
+  }
+}
+
+// Send SMS when payment is made
+app.post('/api/sms/payment-confirmation', async (req, res) => {
+  try {
+    const { tenant_id, amount, confirmation } = req.body;
+    const [user] = await pool.query('SELECT phone, first_name FROM users WHERE id=?', [tenant_id]);
+    if (!user.length || !user[0].phone) return res.json({ success: false, message: 'No phone number on file' });
+    const msg = `Hi ${user[0].first_name}! Your Harborview payment of $${amount} has been confirmed. Confirmation: ${confirmation}. Thank you!`;
+    await sendSMS(user[0].phone, msg);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Send rent reminder SMS to all tenants with pending invoices
+app.post('/api/sms/rent-reminders', async (req, res) => {
+  try {
+    const [pending] = await pool.query(`
+      SELECT i.id, i.amount, i.due_date, u.first_name, u.phone
+      FROM invoices i JOIN users u ON i.tenant_id=u.id
+      WHERE i.status='pending' AND i.invoice_type='rent' AND u.phone IS NOT NULL`);
+    let sent = 0;
+    for (const inv of pending) {
+      const msg = `Hi ${inv.first_name}! Reminder: Your rent of $${parseFloat(inv.amount).toFixed(2)} is due ${new Date(inv.due_date).toLocaleDateString()}. Pay online at your Harborview tenant portal. Questions? Call (415) 555-0100.`;
+      await sendSMS(inv.phone, msg);
+      sent++;
+    }
+    res.json({ success: true, message: `${sent} SMS reminders sent` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Send maintenance update SMS
+app.post('/api/sms/maintenance-update', async (req, res) => {
+  try {
+    const { request_id, status } = req.body;
+    const [req_] = await pool.query(`
+      SELECT m.subject, u.first_name, u.phone
+      FROM maintenance_requests m JOIN users u ON m.tenant_id=u.id
+      WHERE m.id=?`, [request_id]);
+    if (!req_.length || !req_[0].phone) return res.json({ success: false, message: 'No phone on file' });
+    const statusMsg = { scheduled: 'has been scheduled', in_progress: 'is now in progress', completed: 'has been completed' };
+    const msg = `Hi ${req_[0].first_name}! Your maintenance request "${req_[0].subject}" ${statusMsg[status] || 'has been updated'}. Visit your Harborview portal for details.`;
+    await sendSMS(req_[0].phone, msg);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Send custom SMS to any tenant
+app.post('/api/sms/send', async (req, res) => {
+  try {
+    const { tenant_id, message } = req.body;
+    const [user] = await pool.query('SELECT phone, first_name FROM users WHERE id=?', [tenant_id]);
+    if (!user.length || !user[0].phone) return res.json({ success: false, message: 'No phone number on file' });
+    await sendSMS(user[0].phone, message);
+    res.json({ success: true, message: 'SMS sent!' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
