@@ -127,11 +127,11 @@ app.put('/api/auth/password', authMiddleware, async (req, res) => {
 app.get('/api/units', async (req, res) => {
   try {
     const { status, bedrooms, max_rent } = req.query;
-    let sql = `SELECT u.*, (SELECT filepath FROM unit_photos WHERE unit_id=u.id AND is_primary=1 LIMIT 1) AS primary_photo FROM units u WHERE 1=1`;
+    let sql = `SELECT u.*, (SELECT filepath FROM unit_photos WHERE unit_id=u.id AND is_primary=1 LIMIT 1) AS primary_photo, (SELECT COUNT(*) FROM unit_photos WHERE unit_id=u.id) AS photo_count FROM units u WHERE 1=1`;
     const params = [];
-    if (status)    { sql += ' AND u.status=?';        params.push(status); }
+    if (status) { sql += ' AND u.status=?'; params.push(status); }
     if (bedrooms !== undefined && bedrooms !== '') { sql += ' AND u.bedrooms=?'; params.push(bedrooms); }
-    if (max_rent)  { sql += ' AND u.monthly_rent<=?'; params.push(max_rent); }
+    if (max_rent) { sql += ' AND u.monthly_rent<=?'; params.push(max_rent); }
     sql += ' ORDER BY u.monthly_rent ASC';
     const [rows] = await pool.query(sql, params);
     rows.forEach(r => { try { r.amenities = JSON.parse(r.amenities); } catch {} });
@@ -146,7 +146,8 @@ app.get('/api/units/:id', async (req, res) => {
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
     const [photos] = await pool.query('SELECT * FROM unit_photos WHERE unit_id=? ORDER BY sort_order ASC', [req.params.id]);
-    res.json({ success: true, unit, photos });
+    const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
+    res.json({ success: true, unit, photos, reviews });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -154,9 +155,67 @@ app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photo
   try {
     const unitId = req.params.id;
     const [existing] = await pool.query('SELECT COUNT(*) as cnt FROM unit_photos WHERE unit_id=?', [unitId]);
-    const inserts = req.files.map((f, i) => [unitId, f.filename, `/uploads/${f.filename}`, null, i, existing[0].cnt === 0 && i === 0 ? 1 : 0]);
+    const inserts = req.files.map((f, i) => [unitId, f.filename, `/uploads/${f.filename}`, req.body[`caption_${i}`] || null, i, existing[0].cnt === 0 && i === 0 ? 1 : 0]);
     await pool.query('INSERT INTO unit_photos (unit_id,filename,filepath,caption,sort_order,is_primary) VALUES ?', [inserts]);
     res.json({ success: true, message: `${req.files.length} photos uploaded` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { unit_number, building_name, floor, bedrooms, bathrooms, sqft, monthly_rent, deposit, description, amenities, status } = req.body;
+    await pool.query('UPDATE units SET unit_number=?,building_name=?,floor=?,bedrooms=?,bathrooms=?,sqft=?,monthly_rent=?,deposit=?,description=?,amenities=?,status=? WHERE id=?',
+      [unit_number, building_name, floor, bedrooms, bathrooms, sqft, monthly_rent, deposit, description, JSON.stringify(amenities), status, req.params.id]);
+    res.json({ success: true, message: 'Unit updated' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// UNIT REVIEWS
+// ══════════════════════════════════════════════════════════════
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT r.*, u.first_name, u.last_name, un.unit_number, un.building_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id JOIN units un ON r.unit_id=un.id ORDER BY r.created_at DESC');
+    res.json({ success: true, reviews: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/reviews', authMiddleware, async (req, res) => {
+  try {
+    const { unit_id, rating, title, body } = req.body;
+    const [result] = await pool.query('INSERT INTO unit_reviews (unit_id,tenant_id,rating,title,body) VALUES (?,?,?,?,?)', [unit_id, req.user.id, rating, title, body]);
+    res.status(201).json({ success: true, review_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// TOUR SCHEDULING
+// ══════════════════════════════════════════════════════════════
+app.get('/api/tours', authMiddleware, async (req, res) => {
+  try {
+    let sql = `SELECT t.*, u.unit_number, u.building_name, usr.first_name, usr.last_name, usr.email FROM tour_requests t JOIN units u ON t.unit_id=u.id JOIN users usr ON t.tenant_id=usr.id WHERE 1=1`;
+    const params = [];
+    if (req.user.role !== 'admin') { sql += ' AND t.tenant_id=?'; params.push(req.user.id); }
+    sql += ' ORDER BY t.preferred_date ASC';
+    const [rows] = await pool.query(sql, params);
+    res.json({ success: true, tours: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/tours', async (req, res) => {
+  try {
+    const { unit_id, tenant_id, name, email, phone, preferred_date, preferred_time } = req.body;
+    const [result] = await pool.query('INSERT INTO tour_requests (unit_id,tenant_id,name,email,phone,preferred_date,preferred_time) VALUES (?,?,?,?,?,?,?)',
+      [unit_id, tenant_id || null, name, email, phone, preferred_date, preferred_time]);
+    res.status(201).json({ success: true, tour_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/tours/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { status, admin_notes } = req.body;
+    await pool.query('UPDATE tour_requests SET status=?, admin_notes=? WHERE id=?', [status, admin_notes, req.params.id]);
+    res.json({ success: true, message: 'Tour updated' });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -167,8 +226,8 @@ app.post('/api/applications', async (req, res) => {
   try {
     const fields = ['unit_id','first_name','last_name','email','phone','dob','ssn_last4','current_address','desired_movein','num_occupants','pets','employment_status','employer_name','employer_address','employer_phone','supervisor_name','job_title','employment_start','annual_income','additional_income','prev_address1','prev_rent1','prev_duration1','prev_landlord1','prev_landlord_phone1','prev_reason1','prev_address2','prev_rent2','prev_duration2','prev_landlord2','prev_landlord_phone2','ever_evicted','ever_broken_lease','rental_notes','ref1_name','ref1_relationship','ref1_phone','ref1_email','ref2_name','ref2_relationship','ref2_phone','ref2_email','signature','signed_date'];
     const values = fields.map(f => req.body[f] ?? null);
-    const [result] = await pool.query(`INSERT INTO applications (${fields.join(',')}) VALUES (${fields.map(()=>'?').join(',')})`, values);
-    res.status(201).json({ success: true, application_id: result.insertId, reference: `HV-${new Date().getFullYear()}-${String(result.insertId).padStart(4,'0')}` });
+    const [result] = await pool.query(`INSERT INTO applications (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`, values);
+    res.status(201).json({ success: true, application_id: result.insertId, reference: `HV-${new Date().getFullYear()}-${String(result.insertId).padStart(4, '0')}` });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -180,6 +239,14 @@ app.get('/api/applications', authMiddleware, async (req, res) => {
     sql += ' ORDER BY a.created_at DESC';
     const [rows] = await pool.query(sql, params);
     res.json({ success: true, applications: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/applications/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { status, decision_notes } = req.body;
+    await pool.query('UPDATE applications SET status=?, decision_notes=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?', [status, decision_notes, req.user.id, req.params.id]);
+    res.json({ success: true, message: 'Application updated' });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -199,14 +266,15 @@ app.get('/api/leases', authMiddleware, async (req, res) => {
 app.post('/api/leases', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { unit_id, tenant_id, lease_start, lease_end, monthly_rent, security_deposit, parking_fee, pet_fee, notes } = req.body;
-    const [result] = await pool.query("INSERT INTO leases (unit_id,tenant_id,lease_start,lease_end,monthly_rent,security_deposit,parking_fee,pet_fee,status,notes) VALUES (?,?,?,?,?,?,?,?,'active',?)", [unit_id, tenant_id, lease_start, lease_end, monthly_rent, security_deposit, parking_fee||0, pet_fee||0, notes]);
+    const [result] = await pool.query("INSERT INTO leases (unit_id,tenant_id,lease_start,lease_end,monthly_rent,security_deposit,parking_fee,pet_fee,status,notes) VALUES (?,?,?,?,?,?,?,?,'active',?)",
+      [unit_id, tenant_id, lease_start, lease_end, monthly_rent, security_deposit, parking_fee || 0, pet_fee || 0, notes]);
     await pool.query("UPDATE units SET status='occupied' WHERE id=?", [unit_id]);
     res.status(201).json({ success: true, lease_id: result.insertId });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 // ══════════════════════════════════════════════════════════════
-// INVOICES ROUTES
+// INVOICES — including utility billing
 // ══════════════════════════════════════════════════════════════
 app.get('/api/invoices', authMiddleware, async (req, res) => {
   try {
@@ -214,6 +282,7 @@ app.get('/api/invoices', authMiddleware, async (req, res) => {
     const params = [];
     if (req.user.role !== 'admin') { sql += ' AND i.tenant_id=?'; params.push(req.user.id); }
     if (req.query.status) { sql += ' AND i.status=?'; params.push(req.query.status); }
+    if (req.query.type) { sql += ' AND i.invoice_type=?'; params.push(req.query.type); }
     sql += ' ORDER BY i.due_date DESC';
     const [rows] = await pool.query(sql, params);
     res.json({ success: true, invoices: rows });
@@ -222,9 +291,45 @@ app.get('/api/invoices', authMiddleware, async (req, res) => {
 
 app.post('/api/invoices', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { tenant_id, lease_id, invoice_type, description, amount, due_date, period_start, period_end } = req.body;
-    const [result] = await pool.query('INSERT INTO invoices (tenant_id,lease_id,invoice_type,description,amount,due_date,period_start,period_end) VALUES (?,?,?,?,?,?,?,?)', [tenant_id, lease_id, invoice_type, description, amount, due_date, period_start, period_end]);
+    const { tenant_id, lease_id, invoice_type, description, amount, due_date, period_start, period_end, meter_reading_start, meter_reading_end, utility_rate } = req.body;
+    const [result] = await pool.query(
+      'INSERT INTO invoices (tenant_id,lease_id,invoice_type,description,amount,due_date,period_start,period_end,meter_reading_start,meter_reading_end,utility_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [tenant_id, lease_id, invoice_type, description, amount, due_date, period_start, period_end, meter_reading_start || null, meter_reading_end || null, utility_rate || null]
+    );
     res.status(201).json({ success: true, invoice_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Generate monthly invoices for all active leases
+app.post('/api/invoices/generate-monthly', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const [leases] = await pool.query("SELECT * FROM leases WHERE status='active'");
+    const dueDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    let created = 0;
+    for (const lease of leases) {
+      const [dup] = await pool.query("SELECT id FROM invoices WHERE lease_id=? AND invoice_type='rent' AND due_date=?", [lease.id, dueDate]);
+      if (!dup.length) {
+        await pool.query("INSERT INTO invoices (tenant_id,lease_id,invoice_type,description,amount,due_date,period_start,period_end) VALUES (?,?,'rent',?,?,?,?)",
+          [lease.tenant_id, lease.id, `Rent – ${month}/${year}`, lease.monthly_rent, dueDate, dueDate, `${year}-${String(month).padStart(2, '0')}-28`]);
+        created++;
+      }
+    }
+    res.json({ success: true, message: `${created} rent invoices generated` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Generate utility bills — gas/electric, water, internet, garbage
+app.post('/api/invoices/generate-utility', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { tenant_id, lease_id, utility_type, amount, due_date, period_start, period_end, meter_reading_start, meter_reading_end, utility_rate, notes } = req.body;
+    const utilityLabels = { gas_electric: 'Gas & Electric', water: 'Water', internet_tv: 'Internet/TV', garbage: 'Garbage Collection' };
+    const label = utilityLabels[utility_type] || utility_type;
+    const [result] = await pool.query(
+      'INSERT INTO invoices (tenant_id,lease_id,invoice_type,description,amount,due_date,period_start,period_end,meter_reading_start,meter_reading_end,utility_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [tenant_id, lease_id, utility_type, `${label}${notes ? ' — ' + notes : ''}`, amount, due_date, period_start, period_end, meter_reading_start || null, meter_reading_end || null, utility_rate || null]
+    );
+    res.status(201).json({ success: true, invoice_id: result.insertId, message: `${label} bill created` });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -251,11 +356,11 @@ app.post('/api/payments', authMiddleware, async (req, res) => {
     if (!inv.length) throw new Error('Invoice not found');
     const [result] = await conn.query(
       "INSERT INTO payments (invoice_id,tenant_id,amount,payment_method,transaction_id,last4,status,paid_at) VALUES (?,?,?,?,?,?,'completed',NOW())",
-      [invoice_id, inv[0].tenant_id, amount, payment_method, `HV-${Date.now()}`, last4||null]
+      [invoice_id, inv[0].tenant_id, amount, payment_method, `HV-${Date.now()}`, last4 || null]
     );
     await conn.query("UPDATE invoices SET status='paid' WHERE id=?", [invoice_id]);
     await conn.commit();
-    res.status(201).json({ success: true, payment_id: result.insertId, confirmation: `HV-PAY-${String(result.insertId).padStart(4,'0')}` });
+    res.status(201).json({ success: true, payment_id: result.insertId, confirmation: `HV-PAY-${String(result.insertId).padStart(4, '0')}` });
   } catch (e) { await conn.rollback(); res.status(500).json({ success: false, message: e.message }); }
   finally { conn.release(); }
 });
@@ -281,9 +386,132 @@ app.post('/api/maintenance', authMiddleware, upload.array('photos', 5), async (r
     if (!lease.length) return res.status(400).json({ success: false, message: 'No active lease found' });
     const [result] = await pool.query(
       'INSERT INTO maintenance_requests (tenant_id,unit_id,category,priority,subject,description,access_perm,preferred_time) VALUES (?,?,?,?,?,?,?,?)',
-      [req.user.id, lease[0].unit_id, category, priority||'normal', subject, description, access_perm==='true'?1:0, preferred_time]
+      [req.user.id, lease[0].unit_id, category, priority || 'normal', subject, description, access_perm === 'true' ? 1 : 0, preferred_time]
     );
     res.status(201).json({ success: true, request_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/maintenance/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { status, assigned_to, scheduled_at, resolution_notes } = req.body;
+    await pool.query('UPDATE maintenance_requests SET status=?,assigned_to=?,scheduled_at=?,resolution_notes=? WHERE id=?',
+      [status, assigned_to, scheduled_at, resolution_notes, req.params.id]);
+    res.json({ success: true, message: 'Request updated' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// MESSAGING
+// ══════════════════════════════════════════════════════════════
+app.get('/api/messages', authMiddleware, async (req, res) => {
+  try {
+    let sql = `SELECT m.*, u.first_name, u.last_name, u.role FROM messages m JOIN users u ON m.sender_id=u.id WHERE 1=1`;
+    const params = [];
+    if (req.user.role !== 'admin') { sql += ' AND (m.sender_id=? OR m.recipient_id=?)'; params.push(req.user.id, req.user.id); }
+    sql += ' ORDER BY m.created_at DESC LIMIT 100';
+    const [rows] = await pool.query(sql, params);
+    res.json({ success: true, messages: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/messages', authMiddleware, async (req, res) => {
+  try {
+    const { recipient_id, subject, body } = req.body;
+    const [result] = await pool.query('INSERT INTO messages (sender_id,recipient_id,subject,body) VALUES (?,?,?,?)',
+      [req.user.id, recipient_id, subject, body]);
+    res.status(201).json({ success: true, message_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/messages/:id/read', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('UPDATE messages SET is_read=1 WHERE id=? AND recipient_id=?', [req.params.id, req.user.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// ANNOUNCEMENTS
+// ══════════════════════════════════════════════════════════════
+app.get('/api/announcements', async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM announcements WHERE (expires_at IS NULL OR expires_at > NOW()) ORDER BY pinned DESC, created_at DESC");
+    res.json({ success: true, announcements: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/announcements', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { title, body, audience, pinned, expires_at } = req.body;
+    const [result] = await pool.query('INSERT INTO announcements (title,body,audience,pinned,expires_at,created_by,published_at) VALUES (?,?,?,?,?,?,NOW())',
+      [title, body, audience || 'tenants', pinned ? 1 : 0, expires_at || null, req.user.id]);
+    res.status(201).json({ success: true, announcement_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.delete('/api/announcements/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM announcements WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// PARKING MANAGEMENT
+// ══════════════════════════════════════════════════════════════
+app.get('/api/parking', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT p.*, u.first_name, u.last_name FROM parking_spots p LEFT JOIN users u ON p.tenant_id=u.id ORDER BY p.spot_number ASC`);
+    res.json({ success: true, spots: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/parking', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { spot_number, spot_type, tenant_id, monthly_fee, notes } = req.body;
+    const [result] = await pool.query('INSERT INTO parking_spots (spot_number,spot_type,tenant_id,monthly_fee,notes,status) VALUES (?,?,?,?,?,?)',
+      [spot_number, spot_type || 'standard', tenant_id || null, monthly_fee || 0, notes, tenant_id ? 'occupied' : 'available']);
+    res.status(201).json({ success: true, spot_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/parking/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { tenant_id, monthly_fee, notes, status } = req.body;
+    await pool.query('UPDATE parking_spots SET tenant_id=?,monthly_fee=?,notes=?,status=? WHERE id=?',
+      [tenant_id || null, monthly_fee, notes, status, req.params.id]);
+    res.json({ success: true, message: 'Parking spot updated' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// PACKAGE NOTIFICATIONS
+// ══════════════════════════════════════════════════════════════
+app.get('/api/packages', authMiddleware, async (req, res) => {
+  try {
+    let sql = `SELECT p.*, u.first_name, u.last_name, u.email FROM packages p JOIN users u ON p.tenant_id=u.id WHERE 1=1`;
+    const params = [];
+    if (req.user.role !== 'admin') { sql += ' AND p.tenant_id=?'; params.push(req.user.id); }
+    sql += ' ORDER BY p.received_at DESC';
+    const [rows] = await pool.query(sql, params);
+    res.json({ success: true, packages: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/packages', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { tenant_id, carrier, tracking_number, description, location } = req.body;
+    const [result] = await pool.query('INSERT INTO packages (tenant_id,carrier,tracking_number,description,location,received_at) VALUES (?,?,?,?,?,NOW())',
+      [tenant_id, carrier, tracking_number, description, location || 'Front Desk']);
+    res.status(201).json({ success: true, package_id: result.insertId });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/packages/:id/pickup', authMiddleware, async (req, res) => {
+  try {
+    await pool.query("UPDATE packages SET status='picked_up', picked_up_at=NOW() WHERE id=?", [req.params.id]);
+    res.json({ success: true, message: 'Package marked as picked up' });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -305,16 +533,14 @@ app.post('/api/documents', authMiddleware, upload.single('file'), async (req, re
   try {
     const { title, related_type } = req.body;
     const f = req.file;
-    const [result] = await pool.query(
-      'INSERT INTO documents (owner_id,related_type,title,filename,filepath,file_size,mime_type,uploaded_by) VALUES (?,?,?,?,?,?,?,?)',
-      [req.user.id, related_type||'general', title, f.filename, `/uploads/${f.filename}`, f.size, f.mimetype, req.user.id]
-    );
+    const [result] = await pool.query('INSERT INTO documents (owner_id,related_type,title,filename,filepath,file_size,mime_type,uploaded_by) VALUES (?,?,?,?,?,?,?,?)',
+      [req.user.id, related_type || 'general', title, f.filename, `/uploads/${f.filename}`, f.size, f.mimetype, req.user.id]);
     res.status(201).json({ success: true, document_id: result.insertId });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 // ══════════════════════════════════════════════════════════════
-// ADMIN ROUTES
+// ADMIN DASHBOARD
 // ══════════════════════════════════════════════════════════════
 app.get('/api/admin/dashboard', authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -324,14 +550,34 @@ app.get('/api/admin/dashboard', authMiddleware, adminOnly, async (req, res) => {
     const [[revenue]] = await pool.query("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE status='completed' AND MONTH(paid_at)=MONTH(NOW()) AND YEAR(paid_at)=YEAR(NOW())");
     const [[maint]]   = await pool.query("SELECT COUNT(*) c FROM maintenance_requests WHERE status IN ('open','scheduled')");
     const [[apps]]    = await pool.query("SELECT COUNT(*) c FROM applications WHERE status='submitted'");
-    res.json({ success: true, stats: { total_units: units.c, available: units.avail, occupied: units.occ, active_tenants: tenants.c, pending_invoices: pending.c, monthly_revenue: revenue.total, open_maintenance: maint.c, new_applications: apps.c } });
+    const [[msgs]]    = await pool.query("SELECT COUNT(*) c FROM messages WHERE is_read=0 AND recipient_id IN (SELECT id FROM users WHERE role='admin')");
+    const [[pkgs]]    = await pool.query("SELECT COUNT(*) c FROM packages WHERE status='pending'");
+    const [[tours]]   = await pool.query("SELECT COUNT(*) c FROM tour_requests WHERE status='pending'");
+    const [utility_summary] = await pool.query("SELECT invoice_type, SUM(amount) total FROM invoices WHERE invoice_type IN ('gas_electric','water','internet_tv','garbage') AND status='pending' GROUP BY invoice_type");
+    res.json({ success: true, stats: {
+      total_units: units.c, available: units.avail, occupied: units.occ,
+      active_tenants: tenants.c, pending_invoices: pending.c,
+      monthly_revenue: revenue.total, open_maintenance: maint.c,
+      new_applications: apps.c, unread_messages: msgs.c,
+      pending_packages: pkgs.c, pending_tours: tours.c,
+      utility_summary
+    }});
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 app.get('/api/admin/tenants', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const [rows] = await pool.query(`SELECT u.*, l.unit_id, un.unit_number, l.monthly_rent, l.lease_end FROM users u LEFT JOIN leases l ON l.tenant_id=u.id AND l.status='active' LEFT JOIN units un ON l.unit_id=un.id WHERE u.role='tenant' ORDER BY u.created_at DESC`);
+    const [rows] = await pool.query(`SELECT u.*, l.unit_id, un.unit_number, un.building_name, l.monthly_rent, l.lease_end FROM users u LEFT JOIN leases l ON l.tenant_id=u.id AND l.status='active' LEFT JOIN units un ON l.unit_id=un.id WHERE u.role='tenant' ORDER BY u.created_at DESC`);
     res.json({ success: true, tenants: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.get('/api/admin/reports/revenue', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [monthly] = await pool.query("SELECT DATE_FORMAT(paid_at,'%Y-%m') as month, SUM(amount) as total, COUNT(*) as count FROM payments WHERE status='completed' GROUP BY DATE_FORMAT(paid_at,'%Y-%m') ORDER BY month DESC LIMIT 12");
+    const [by_type] = await pool.query("SELECT i.invoice_type, SUM(p.amount) as total FROM payments p JOIN invoices i ON p.invoice_id=i.id WHERE p.status='completed' GROUP BY i.invoice_type");
+    const [occupancy] = await pool.query("SELECT status, COUNT(*) as count FROM units GROUP BY status");
+    res.json({ success: true, monthly, by_type, occupancy });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
