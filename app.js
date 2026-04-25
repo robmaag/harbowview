@@ -544,24 +544,51 @@ app.post('/api/documents', authMiddleware, upload.single('file'), async (req, re
 // ══════════════════════════════════════════════════════════════
 app.get('/api/admin/dashboard', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const [[units]]   = await pool.query("SELECT COUNT(*) c, SUM(status='available') avail, SUM(status='occupied') occ FROM units");
-    const [[tenants]] = await pool.query("SELECT COUNT(*) c FROM users WHERE role='tenant' AND is_active=1");
-    const [[pending]] = await pool.query("SELECT COUNT(*) c FROM invoices WHERE status='pending'");
-    const [[revenue]] = await pool.query("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE status='completed' AND MONTH(paid_at)=MONTH(NOW()) AND YEAR(paid_at)=YEAR(NOW())");
-    const [[maint]]   = await pool.query("SELECT COUNT(*) c FROM maintenance_requests WHERE status IN ('open','scheduled')");
+    const [[units]]   = await pool.query("SELECT COUNT(*) total, SUM(status='available') available, SUM(status='occupied') occupied FROM units");
+    const [[tenants]] = await pool.query("SELECT COUNT(*) total, SUM(is_active=1) active FROM users WHERE role='tenant'");
+    const [[revenue]] = await pool.query("SELECT COALESCE(SUM(amount),0) collected_month FROM payments WHERE status='completed' AND MONTH(paid_at)=MONTH(NOW()) AND YEAR(paid_at)=YEAR(NOW())");
+    const [[pending_amt]] = await pool.query("SELECT COALESCE(SUM(amount),0) pending_amount FROM invoices WHERE status IN ('pending','overdue')");
+    const [[maint]]   = await pool.query("SELECT COUNT(*) open, SUM(priority='urgent') urgent, SUM(status='scheduled') scheduled FROM maintenance_requests WHERE status IN ('open','scheduled','in_progress')");
     const [[apps]]    = await pool.query("SELECT COUNT(*) c FROM applications WHERE status='submitted'");
     const [[msgs]]    = await pool.query("SELECT COUNT(*) c FROM messages WHERE is_read=0 AND recipient_id IN (SELECT id FROM users WHERE role='admin')");
     const [[pkgs]]    = await pool.query("SELECT COUNT(*) c FROM packages WHERE status='pending'");
     const [[tours]]   = await pool.query("SELECT COUNT(*) c FROM tour_requests WHERE status='pending'");
-    const [utility_summary] = await pool.query("SELECT invoice_type, SUM(amount) total FROM invoices WHERE invoice_type IN ('gas_electric','water','internet_tv','garbage') AND status='pending' GROUP BY invoice_type");
-    res.json({ success: true, stats: {
-      total_units: units.c, available: units.avail, occupied: units.occ,
-      active_tenants: tenants.c, pending_invoices: pending.c,
-      monthly_revenue: revenue.total, open_maintenance: maint.c,
-      new_applications: apps.c, unread_messages: msgs.c,
-      pending_packages: pkgs.c, pending_tours: tours.c,
-      utility_summary
-    }});
+
+    // Recent payments with tenant and unit info
+    const [recentPayments] = await pool.query(`
+      SELECT p.*, u.first_name, u.last_name, un.unit_number, p.created_at as payment_date
+      FROM payments p 
+      JOIN users u ON p.tenant_id=u.id 
+      LEFT JOIN leases l ON l.tenant_id=u.id AND l.status='active'
+      LEFT JOIN units un ON l.unit_id=un.id
+      WHERE p.status='completed' 
+      ORDER BY p.created_at DESC LIMIT 6`);
+
+    // Overdue bills with tenant info
+    const [overdueBills] = await pool.query(`
+      SELECT i.*, u.first_name, u.last_name, un.unit_number
+      FROM invoices i
+      JOIN users u ON i.tenant_id=u.id
+      LEFT JOIN leases l ON l.tenant_id=u.id AND l.status='active'
+      LEFT JOIN units un ON l.unit_id=un.id
+      WHERE i.status IN ('overdue','pending')
+      ORDER BY i.due_date ASC LIMIT 5`);
+
+    res.json({ 
+      success: true, 
+      stats: {
+        units: { total: units.total, available: units.available, occupied: units.occupied },
+        tenants: { total: tenants.total, active: tenants.active },
+        financials: { collected_month: revenue.collected_month, pending_amount: pending_amt.pending_amount },
+        maintenance: { open: maint.open, urgent: maint.urgent || 0, scheduled: maint.scheduled || 0 },
+        new_applications: apps.c,
+        unread_messages: msgs.c,
+        pending_packages: pkgs.c,
+        pending_tours: tours.c
+      },
+      recentPayments,
+      overdueBills
+    });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
