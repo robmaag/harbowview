@@ -616,6 +616,60 @@ app.listen(PORT, () => console.log('🏢 Harborview running on port ' + PORT));
 module.exports = app;
 
 // ══════════════════════════════════════════════════════════════
+// BACKGROUND CHECKS
+// ══════════════════════════════════════════════════════════════
+
+// Create background_checks table if not exists
+pool.query(`CREATE TABLE IF NOT EXISTS background_checks (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id INT NOT NULL,
+  agency_used VARCHAR(100),
+  credit_score INT DEFAULT NULL,
+  overall_result ENUM('approved','conditional','denied','pending') DEFAULT 'pending',
+  criminal_record ENUM('clear','minor','disqualifying') DEFAULT 'clear',
+  eviction_history ENUM('none','dismissed','found') DEFAULT 'none',
+  notes TEXT,
+  visible_to_tenant BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_by INT,
+  FOREIGN KEY (tenant_id) REFERENCES users(id),
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+)`).catch(e => console.error('BG table error:', e.message));
+
+app.get('/api/background/all', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT b.*, u.first_name, u.last_name FROM background_checks b JOIN users u ON b.tenant_id=u.id ORDER BY b.completed_at DESC`);
+    res.json({ success: true, reports: rows });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.get('/api/background/my', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT * FROM background_checks WHERE tenant_id=? AND visible_to_tenant=1 ORDER BY completed_at DESC`, [req.user.id]);
+    res.json({ success: true, reports: rows });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/background', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { tenant_id, agency_used, credit_score, overall_result, criminal_record, eviction_history, notes, visible_to_tenant } = req.body;
+    const [result] = await pool.query(
+      'INSERT INTO background_checks (tenant_id,agency_used,credit_score,overall_result,criminal_record,eviction_history,notes,visible_to_tenant,created_by) VALUES (?,?,?,?,?,?,?,?,?)',
+      [tenant_id, agency_used, credit_score || null, overall_result, criminal_record, eviction_history, notes, visible_to_tenant === '1' ? 1 : 0, req.user.id]
+    );
+    res.status(201).json({ success: true, report_id: result.insertId });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Update documents route to include user info for admin
+app.get('/api/documents/all', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT d.*, u.first_name, u.last_name FROM documents d LEFT JOIN users u ON d.owner_id=u.id ORDER BY d.uploaded_at DESC`);
+    res.json({ success: true, documents: rows });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
 // SMS REMINDERS — Twilio
 // ══════════════════════════════════════════════════════════════
 async function sendSMS(to, message) {
