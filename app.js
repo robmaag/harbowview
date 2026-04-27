@@ -259,7 +259,421 @@ app.post('/api/leases/generate', authMiddleware, adminOnly, async (req, res) => 
     const deposit = security_deposit || monthly_rent * 2;
     const startFormatted = new Date(start_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const endFormatted = new Date(end_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    const leaseDoc = `CALIFORNIA RESIDENTIAL LEASE AGREEMENT\n\nLease ID: APE-${Date.now()}\nGenerated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}\n\nLANDLORD: A Phoenix Enterprises LLC\nAddress: Concord, CA 94520\n\nTENANT: ${tenant.first_name} ${tenant.last_name}\nEmail: ${tenant.email}\nPhone: ${tenant.phone || 'N/A'}\n\nUNIT: ${unit.unit_number}\nLEASE TERM: ${startFormatted} to ${endFormatted}\n\nMONTHLY RENT: $${parseFloat(monthly_rent).toFixed(2)}\nDUE DATE: 1st of each month\nGRACE PERIOD: ${grace_period_days || 5} days\nLATE FEE: $${late_fee || 50}.00\n\nSECURITY DEPOSIT: $${parseFloat(deposit).toFixed(2)}\n(Returned within 21 days of vacating per CA Civil Code 1950.5)\n\nCALIFORNIA DISCLOSURES:\n- Smoking prohibited per CA Government Code 7597\n- 24-hour notice required for entry per CA Civil Code 1954\n- Tenant Protection Act (AB 1482) may apply\n- Mold disclosure provided per CA Health & Safety Code 26147\n\nSPECIAL TERMS:\n${special_terms || 'None.'}\n\n[AWAITING TENANT E-SIGNATURE]`;
+    const leaseDoc = `CALIFORNIA RESIDENTIAL LEASE OR MONTH-TO-MONTH RENTAL AGREEMENT
+
+Lease ID: APE-${Date.now()}
+Date Prepared: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+
+This agreement is entered into by and between:
+
+LANDLORD/PROPERTY MANAGER:
+Name: A Phoenix Enterprises LLC
+Address: Concord, CA 94520
+Phone: (925) 555-0200
+Email: management@aphoenixenterprises.com
+CalDRE License #: [Insert License Number]
+
+TENANT(S):
+Name: ${tenant.first_name} ${tenant.last_name}
+Email: ${tenant.email}
+Phone: ${tenant.phone || 'N/A'}
+
+================================================================================
+1. PROPERTY
+================================================================================
+
+Landlord rents to Tenant the residential property located at:
+Unit: ${unit.unit_number}
+City: Concord, State: California, Zip: 94520
+
+The premises are for residential use only. The number of persons occupying
+the premises shall not exceed the number agreed upon without prior written
+consent of Landlord.
+
+================================================================================
+2. TERM
+================================================================================
+
+A. FIXED TERM: This Agreement creates a fixed-term tenancy beginning on
+   ${startFormatted} and ending on ${endFormatted}.
+
+B. MONTH-TO-MONTH: At the expiration of the fixed term, tenancy shall
+   automatically convert to a month-to-month tenancy unless either party
+   provides written notice of termination at least 30 days prior to the
+   end of the term.
+
+C. HOLDOVER: If Tenant remains in possession after expiration without
+   Landlord consent, Tenant shall be liable for double rent and damages
+   per California Civil Code Section 1945.
+
+================================================================================
+3. RENT
+================================================================================
+
+A. AMOUNT: Monthly rent is $${parseFloat(monthly_rent).toFixed(2)}, due and payable on the 1st day
+   of each calendar month.
+
+B. PAYMENT METHOD: Rent shall be paid via the A Phoenix Enterprises tenant
+   portal at https://melodic-griffin-a29a8a.netlify.app or via PayPal to
+   @APhoenixEnterprise (paypal.me/robertmaagdenberg1).
+
+C. GRACE PERIOD: Rent received after the ${grace_period_days || 5} day of the month is
+   considered late.
+
+D. LATE CHARGE: If rent is not received by the ${grace_period_days || 5} day of the month,
+   Tenant shall pay a late charge of $${late_fee || 50}. This charge is agreed to be
+   a reasonable estimate of costs incurred due to late payment.
+   (California Civil Code Section 1671)
+
+E. RETURNED CHECKS: A charge of $25.00 will be assessed for each returned
+   check. After one returned check, Landlord may require certified funds.
+
+F. RENT INCREASES: Rent shall not be increased during the fixed term.
+   After the fixed term, Landlord shall provide minimum 30 days written
+   notice for increases under 10%, and 90 days notice for increases over
+   10%, per California Civil Code Section 827.
+
+================================================================================
+4. SECURITY DEPOSIT
+================================================================================
+
+A. AMOUNT: Tenant shall pay a security deposit of $${parseFloat(deposit).toFixed(2)}.
+
+B. MAXIMUM: The security deposit does not exceed two (2) months rent for
+   unfurnished units, as required by California Civil Code Section 1950.5.
+
+C. RETURN: Within 21 days after Tenant vacates, Landlord shall return the
+   deposit with an itemized statement of deductions for:
+   - Unpaid rent
+   - Cleaning to restore unit to same level of cleanliness at move-in
+   - Repair of damages beyond normal wear and tear
+   - Other reasonable charges per the lease
+
+D. NORMAL WEAR AND TEAR: Landlord may NOT deduct for normal wear and tear,
+   per California Civil Code Section 1950.5(b).
+
+================================================================================
+5. MOVE-IN / MOVE-OUT INSPECTION
+================================================================================
+
+A. Landlord shall conduct a move-in inspection and provide Tenant with a
+   written statement of the condition of the premises.
+
+B. PRELIMINARY INSPECTION: Tenant has the right to request a preliminary
+   inspection 2 weeks before vacating. Landlord shall provide a written
+   statement identifying conditions that may result in deductions.
+   (California Civil Code Section 1950.5(f))
+
+================================================================================
+6. UTILITIES AND SERVICES
+================================================================================
+
+The following utilities are the responsibility of each party:
+
+Electricity:        [ ] Landlord  [X] Tenant
+Gas:                [ ] Landlord  [X] Tenant
+Water/Sewer:        [ ] Landlord  [X] Tenant
+Garbage:            [ ] Landlord  [X] Tenant
+Internet/Cable:     [ ] Landlord  [X] Tenant
+
+Tenant is responsible for establishing and maintaining utility accounts in
+Tenant's name. Failure to maintain utilities may be grounds for eviction.
+
+================================================================================
+7. PARKING
+================================================================================
+
+A. One (1) parking space is assigned to Tenant as part of this tenancy.
+B. Unauthorized vehicles may be towed at vehicle owner's expense.
+C. Tenant shall not perform vehicle repairs on the premises.
+D. Guest parking, if available, is limited to 72 consecutive hours.
+
+================================================================================
+8. STORAGE
+================================================================================
+
+Storage facilities, if any, are provided as a courtesy and Landlord is not
+responsible for loss or damage to stored items. Tenant is advised to obtain
+renters insurance to cover personal property.
+
+================================================================================
+9. OCCUPANTS
+================================================================================
+
+The premises shall be occupied only by the Tenant(s) named in this Agreement.
+Any person occupying the premises for more than 14 consecutive days or more
+than 30 days in any 12-month period shall be considered an unauthorized occupant.
+Tenant must obtain written approval from Landlord before any additional occupant
+may reside at the premises.
+
+================================================================================
+10. SUBLETTING AND ASSIGNMENT
+================================================================================
+
+Tenant shall not sublet the premises or any part thereof, nor assign this
+Agreement, without prior written consent of Landlord. Unauthorized subletting
+including short-term rentals (Airbnb, VRBO, etc.) is grounds for termination
+of tenancy. (California Civil Code Section 1995.310)
+
+================================================================================
+11. PETS
+================================================================================
+
+NO PETS are permitted on the premises without prior written approval from
+Landlord. Unauthorized pets are grounds for termination. If pets are approved:
+- A pet deposit (refundable) and monthly pet fee may be required
+- Tenant is liable for all damages caused by pets
+- Tenant must clean up after pets in all common areas
+- Aggressive breeds are prohibited regardless of approval
+
+================================================================================
+12. MAINTENANCE AND REPAIRS
+================================================================================
+
+A. TENANT RESPONSIBILITIES: Tenant shall:
+   1. Keep the unit clean and sanitary
+   2. Properly dispose of garbage and recyclables
+   3. Use all fixtures and appliances properly
+   4. Report needed repairs promptly through the tenant portal
+   5. Replace light bulbs, batteries in smoke/CO detectors
+   6. Maintain HVAC filters (if applicable)
+   7. Keep drains clear and report any leaks immediately
+
+B. LANDLORD RESPONSIBILITIES: Landlord shall maintain the premises in
+   habitable condition including:
+   1. Effective waterproofing and weather protection
+   2. Adequate heating facilities
+   3. Plumbing, electrical, and gas in good working order
+   4. Clean and sanitary common areas
+   (California Civil Code Sections 1941-1942)
+
+C. ALTERATIONS: Tenant shall not make any alterations, additions, or
+   improvements without prior written consent of Landlord. Any approved
+   alterations become property of Landlord unless otherwise agreed in writing.
+
+D. DAMAGE: Tenant is responsible for damage caused by Tenant, occupants,
+   or guests beyond normal wear and tear.
+
+================================================================================
+13. RIGHT OF ENTRY
+================================================================================
+
+Landlord may enter the premises:
+A. In case of emergency without notice
+B. With 24 hours written notice for:
+   - Inspections
+   - Repairs or improvements
+   - Showing to prospective tenants or buyers
+   - Other lawful purposes
+(California Civil Code Section 1954)
+
+Entry shall be made at reasonable times. Tenant may not unreasonably deny
+access after proper notice.
+
+================================================================================
+14. NOISE AND NUISANCE
+================================================================================
+
+A. QUIET HOURS: 10:00 PM to 8:00 AM Sunday through Thursday;
+   11:00 PM to 9:00 AM Friday and Saturday.
+B. Tenant shall not disturb neighbors with excessive noise at any time.
+C. Musical instruments, amplified music, and power tools are subject to
+   quiet hour restrictions.
+D. Violation of noise provisions is grounds for a 3-Day Notice to Cure.
+
+================================================================================
+15. SMOKING POLICY
+================================================================================
+
+SMOKING IS STRICTLY PROHIBITED in the unit, on balconies, patios, within
+20 feet of any window or door, and in all common areas.
+This prohibition includes cigarettes, cigars, pipes, marijuana, vaping/e-cigarettes,
+and all other smoking devices.
+(California Government Code Section 12955; Health & Safety Code Section 1947.5)
+
+Violation is grounds for immediate termination of tenancy. Tenant is liable
+for all costs to remediate smoke damage including painting, carpet replacement,
+and HVAC cleaning.
+
+================================================================================
+16. ILLEGAL ACTIVITY
+================================================================================
+
+Tenant shall not engage in or permit any illegal activity on or near the
+premises including but not limited to:
+- Drug manufacturing, distribution, or use
+- Illegal weapons possession or use
+- Gang activity
+- Any activity that constitutes a nuisance to neighbors
+Violation is grounds for immediate 3-Day Notice to Quit without opportunity
+to cure. (California Code of Civil Procedure Section 1161)
+
+================================================================================
+17. RENTERS INSURANCE
+================================================================================
+
+Tenant is STRONGLY ENCOURAGED to obtain renters insurance to cover personal
+property, liability, and additional living expenses. Landlord's property
+insurance does NOT cover Tenant's personal belongings.
+
+Minimum recommended coverage: $50,000 personal property / $100,000 liability.
+
+================================================================================
+18. MOLD DISCLOSURE
+================================================================================
+
+Tenant acknowledges receipt of information regarding mold. Tenant shall:
+- Promptly report any moisture, water intrusion, or mold growth
+- Maintain adequate ventilation in bathrooms and kitchen
+- Use exhaust fans when cooking or bathing
+- Report plumbing leaks immediately
+(California Health & Safety Code Section 26147-26148)
+
+================================================================================
+19. LEAD-BASED PAINT DISCLOSURE
+================================================================================
+
+If the property was constructed before 1978, federal law requires disclosure
+of known lead-based paint hazards. Tenant acknowledges receipt of the EPA
+pamphlet "Protect Your Family from Lead in Your Home" and any known lead
+hazard information. (42 U.S.C. Section 4852d)
+
+================================================================================
+20. ASBESTOS DISCLOSURE
+================================================================================
+
+If asbestos-containing materials are present and in good condition, they do
+not pose a health risk. Tenant shall not drill, cut, or disturb any building
+materials without Landlord approval.
+
+================================================================================
+21. PEST CONTROL
+================================================================================
+
+Landlord shall provide written notice of any pesticide application at least
+24 hours in advance, including the name and active ingredients of any pesticide
+used. (California Business & Professions Code Section 8538)
+
+Tenant shall:
+- Maintain cleanliness to prevent pest infestation
+- Report any pest problems promptly
+- Not bring infested furniture or items onto premises
+
+================================================================================
+22. RENT CONTROL / TENANT PROTECTIONS (AB 1482)
+================================================================================
+
+This unit MAY be subject to the Tenant Protection Act of 2019 (AB 1482).
+If applicable:
+- Annual rent increases are limited to 5% plus local CPI (max 10%)
+- After 12 months of tenancy, Landlord must have just cause to terminate
+- Just cause includes: nonpayment of rent, breach of lease, criminal activity,
+  owner move-in, substantial renovation, or withdrawal from rental market
+
+Exemptions to AB 1482 include: single-family homes (with proper notice),
+condos sold separately, buildings built within the last 15 years.
+
+================================================================================
+23. TERMINATION
+================================================================================
+
+A. FIXED TERM END: Either party may terminate at lease end with 30 days
+   written notice. If Tenant has resided for 12+ months, Landlord must
+   provide 60 days notice.
+
+B. MONTH-TO-MONTH: Either party may terminate with 30 days written notice
+   (60 days if Tenant has resided for 12+ months).
+   (California Civil Code Section 1946.1)
+
+C. JUST CAUSE: After 12 months of tenancy, Landlord must state just cause
+   for termination per AB 1482 (if applicable).
+
+D. 3-DAY NOTICES:
+   - 3-Day Notice to Pay Rent or Quit: for unpaid rent
+   - 3-Day Notice to Cure or Quit: for lease violations
+   - 3-Day Notice to Quit: for illegal activity (no opportunity to cure)
+
+================================================================================
+24. ABANDONMENT
+================================================================================
+
+If Tenant vacates without notice and rent is unpaid for 14+ days, Landlord
+may treat the unit as abandoned. Landlord shall follow California Civil Code
+Sections 1951.2-1951.3 procedures for re-rental and damage recovery.
+
+================================================================================
+25. LEGAL FEES
+================================================================================
+
+In any legal action arising from this Agreement, the prevailing party shall
+be entitled to reasonable attorney fees and court costs, as determined by
+the court. (California Civil Code Section 1717)
+
+================================================================================
+26. JOINT AND SEVERAL LIABILITY
+================================================================================
+
+If there are multiple tenants, each is jointly and severally liable for all
+obligations under this Agreement, including full payment of rent.
+
+================================================================================
+27. ENTIRE AGREEMENT
+================================================================================
+
+This Agreement constitutes the entire agreement between the parties. No oral
+agreements have been made. Any modifications must be in writing and signed
+by both parties. This Agreement shall be construed under California law.
+
+================================================================================
+28. ADDITIONAL TERMS
+================================================================================
+
+${special_terms || 'None.'}
+
+================================================================================
+MOVE-IN CHECKLIST
+================================================================================
+
+A move-in inspection checklist will be completed and signed by both parties
+prior to occupancy. The checklist documents the condition of the premises
+and becomes part of this Agreement.
+
+================================================================================
+SIGNATURES
+================================================================================
+
+By signing below, both parties agree to all terms of this Residential Lease
+Agreement and acknowledge receipt of all required disclosures.
+
+LANDLORD: A Phoenix Enterprises LLC
+
+Signature: _________________________________  Date: ________________
+Robert Maagdenberg, Authorized Agent/Property Manager
+CalDRE License: [Insert Number]
+
+TENANT: ${tenant.first_name} ${tenant.last_name}
+
+[AWAITING TENANT ELECTRONIC SIGNATURE]
+
+By electronically signing, Tenant confirms they have read, understand, and
+agree to be bound by all terms of this Lease Agreement. This electronic
+signature is legally binding under California Civil Code and the Electronic
+Signatures in Global and National Commerce Act (E-SIGN Act, 15 U.S.C. 7001).
+
+================================================================================
+NOTICE TO TENANT
+================================================================================
+
+California law requires Landlord to provide the following notices:
+1. Methamphetamine Contamination Disclosure (H&S Code 25400.28)
+2. Flood Zone Disclosure (if applicable)
+3. Military Ordnance Disclosure (if within 1 mile of ordnance site)
+4. Industrial Use Disclosure (if within 1 mile of industrial zone)
+5. Right to request preliminary move-out inspection
+6. Bedbug disclosure (H&S Code 17920.3)
+7. Proposition 65 Warning (if applicable)
+
+`;
     const [result] = await pool.query(
       `INSERT INTO leases (unit_id, tenant_id, lease_start, lease_end, monthly_rent, security_deposit, status, lease_document, created_at) VALUES (?,?,?,?,?,?,'pending_signature',?,NOW())`,
       [unit_id, tenant_id, start_date, end_date, monthly_rent, deposit, leaseDoc]
