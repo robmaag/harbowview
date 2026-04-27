@@ -109,6 +109,14 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+app.put('/api/applications/:id/status', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { status } = req.body;
+    await pool.query('UPDATE applications SET status=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?', [status, req.user.id, req.params.id]);
+    res.json({ success: true, message: `Application ${status}` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 app.put('/api/auth/password', authMiddleware, async (req, res) => {
   try {
     const { current_password, new_password } = req.body;
