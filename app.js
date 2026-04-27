@@ -91,6 +91,54 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// Generate lease agreement
+app.post('/api/leases/generate', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { tenant_id, unit_id, start_date, end_date, monthly_rent, security_deposit, late_fee, grace_period_days, special_terms } = req.body;
+    const [tenants] = await pool.query('SELECT * FROM users WHERE id=?', [tenant_id]);
+    if (!tenants.length) throw new Error('Tenant not found');
+    const tenant = tenants[0];
+    const [units] = await pool.query('SELECT * FROM units WHERE id=?', [unit_id]);
+    if (!units.length) throw new Error('Unit not found');
+    const unit = units[0];
+    const deposit = security_deposit || monthly_rent * 2;
+    const startFormatted = new Date(start_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const endFormatted = new Date(end_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const leaseDoc = `CALIFORNIA RESIDENTIAL LEASE AGREEMENT\n\nLease ID: APE-${Date.now()}\nGenerated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}\n\nLANDLORD: A Phoenix Enterprises LLC\nAddress: Concord, CA 94520\n\nTENANT: ${tenant.first_name} ${tenant.last_name}\nEmail: ${tenant.email}\nPhone: ${tenant.phone || 'N/A'}\n\nUNIT: ${unit.unit_number}\nLEASE TERM: ${startFormatted} to ${endFormatted}\n\nMONTHLY RENT: $${parseFloat(monthly_rent).toFixed(2)}\nDUE DATE: 1st of each month\nGRACE PERIOD: ${grace_period_days || 5} days\nLATE FEE: $${late_fee || 50}.00\n\nSECURITY DEPOSIT: $${parseFloat(deposit).toFixed(2)}\n(Returned within 21 days of vacating per CA Civil Code 1950.5)\n\nCALIFORNIA DISCLOSURES:\n- Smoking prohibited per CA Government Code 7597\n- 24-hour notice required for entry per CA Civil Code 1954\n- Tenant Protection Act (AB 1482) may apply\n- Mold disclosure provided per CA Health & Safety Code 26147\n\nSPECIAL TERMS:\n${special_terms || 'None.'}\n\n[AWAITING TENANT E-SIGNATURE]`;
+    const [result] = await pool.query(
+      `INSERT INTO leases (unit_id, tenant_id, start_date, end_date, monthly_rent, security_deposit, status, lease_document, created_at) VALUES (?,?,?,?,?,?,'pending_signature',?,NOW())`,
+      [unit_id, tenant_id, start_date, end_date, monthly_rent, deposit, leaseDoc]
+    );
+    await pool.query("UPDATE units SET status='reserved' WHERE id=?", [unit_id]);
+    res.json({ success: true, lease_id: result.insertId, message: 'Lease generated! Tenant can now review and sign.' });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Get specific lease with document
+app.get('/api/leases/:id', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT l.*, u.unit_number FROM leases l JOIN units u ON l.unit_id=u.id WHERE l.id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Lease not found' });
+    if (req.user.role !== 'admin' && rows[0].tenant_id !== req.user.id) return res.status(403).json({ success: false, message: 'Unauthorized' });
+    res.json({ success: true, lease: rows[0] });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Sign lease
+app.post('/api/leases/:id/sign', authMiddleware, async (req, res) => {
+  try {
+    const { signature, agreed } = req.body;
+    if (!agreed || !signature) return res.status(400).json({ success: false, message: 'Signature and agreement required' });
+    const [rows] = await pool.query('SELECT * FROM leases WHERE id=?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Lease not found' });
+    if (rows[0].tenant_id !== req.user.id) return res.status(403).json({ success: false, message: 'Unauthorized' });
+    const signatureBlock = `\n\n--- DIGITALLY SIGNED ---\nTenant: ${signature}\nDate: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}\nThis electronic signature is legally binding under California Civil Code and the ESIGN Act.`;
+    await pool.query(`UPDATE leases SET status='active', signed_at=NOW(), tenant_signature=?, lease_document=CONCAT(COALESCE(lease_document,''), ?) WHERE id=?`, [signature, signatureBlock, req.params.id]);
+    await pool.query("UPDATE units SET status='occupied' WHERE id=?", [rows[0].unit_id]);
+    res.json({ success: true, message: 'Lease signed successfully! Welcome home.' });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const [lease] = await pool.query(
