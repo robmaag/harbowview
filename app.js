@@ -269,9 +269,9 @@ This agreement is entered into by and between:
 LANDLORD/PROPERTY MANAGER:
 Name: A Phoenix Enterprises LLC
 Address: Concord, CA 94520
-Phone: (925) 555-0200
+Phone: (408) 373-4038
 Email: management@aphoenixenterprises.com
-CalDRE License #: [Insert License Number]
+CalDRE Broker License #: 01432017
 
 TENANT(S):
 Name: ${tenant.first_name} ${tenant.last_name}
@@ -631,6 +631,118 @@ by both parties. This Agreement shall be construed under California law.
 ${special_terms || 'None.'}
 
 ================================================================================
+29. NON-PAYMENT OF RENT — LEGAL RAMIFICATIONS
+================================================================================
+
+FAILURE TO PAY RENT IS A SERIOUS BREACH OF THIS AGREEMENT. The following
+legal actions may be taken by Landlord:
+
+A. 3-DAY NOTICE TO PAY RENT OR QUIT:
+   Upon non-payment of rent, Landlord may immediately serve a 3-Day Notice
+   to Pay Rent or Quit. Tenant must either pay ALL rent owed or vacate
+   within 3 calendar days (excluding weekends and court holidays).
+   (California Code of Civil Procedure Section 1161(2))
+
+B. UNLAWFUL DETAINER (EVICTION) LAWSUIT:
+   If Tenant fails to pay or vacate after the 3-Day Notice, Landlord may
+   file an Unlawful Detainer action in Contra Costa County Superior Court.
+   - Filing fee: Approximately $240-$435 (recoverable from Tenant)
+   - Court hearing typically scheduled within 20 days
+   - If Landlord prevails, a Judgment for Possession is issued
+   - A Writ of Possession is issued, authorizing Sheriff to remove Tenant
+
+C. SHERIFF LOCKOUT:
+   The Contra Costa County Sheriff's Office will enforce the Writ of
+   Possession. Tenant and all occupants will be removed from the premises.
+   All personal property remaining may be treated as abandoned.
+
+D. MONETARY JUDGMENT:
+   In addition to possession, Landlord may obtain a monetary judgment for:
+   - All unpaid rent
+   - Late fees and returned check fees
+   - Court filing fees and service costs
+   - Attorney fees (per Section 25 of this Agreement)
+   - Damages to the property beyond normal wear and tear
+   - Costs of re-renting the unit
+
+E. CREDIT REPORTING:
+   An eviction judgment will appear on Tenant's credit report and rental
+   history for up to 7 years, severely impacting future housing options.
+
+F. WAGE GARNISHMENT:
+   A monetary judgment may be enforced through wage garnishment of up to
+   25% of Tenant's disposable earnings per California Code of Civil
+   Procedure Section 706.050.
+
+G. BANK LEVY:
+   Landlord may levy Tenant's bank accounts to satisfy a monetary judgment.
+
+H. LIEN ON PROPERTY:
+   A judgment lien may be placed on any real property owned by Tenant in
+   California for up to 10 years.
+
+TENANT IS STRONGLY ADVISED: If you are experiencing financial hardship,
+contact Landlord IMMEDIATELY to discuss payment arrangements BEFORE legal
+action is initiated. Once an Unlawful Detainer is filed, it becomes part
+of the public court record regardless of outcome.
+
+================================================================================
+30. LANDLORD REMEDIES — CONTRA COSTA COUNTY
+================================================================================
+
+In addition to eviction, the following legal actions are available to
+Landlord in Contra Costa County, California:
+
+A. CONTRA COSTA COUNTY SUPERIOR COURT ACTIONS:
+   - Unlawful Detainer (Eviction): Martinez Courthouse
+     725 Court Street, Martinez, CA 94553
+     Phone: (925) 608-1000
+   - Small Claims Court: Claims up to $12,500
+   - Limited Civil Court: Claims $12,501 - $35,000
+   - Unlimited Civil Court: Claims over $35,000
+
+B. JUST CAUSE EVICTION GROUNDS (AB 1482 — after 12 months):
+   At-Fault Just Cause:
+   1. Non-payment of rent
+   2. Material breach of lease (after written notice to cure)
+   3. Maintaining a nuisance
+   4. Criminal activity on or near premises
+   5. Subletting without permission
+   6. Refusal to execute a new lease with similar terms
+   7. Refusal to allow lawful entry after proper notice
+   8. Using premises for unlawful purposes
+
+   No-Fault Just Cause (relocation assistance required):
+   1. Owner or family member move-in
+   2. Withdrawal of unit from rental market (Ellis Act)
+   3. Substantial rehabilitation/remodel requiring vacancy
+   4. Government order requiring vacancy
+   (California Civil Code Section 1946.2)
+
+C. RELOCATION ASSISTANCE:
+   For No-Fault evictions, Landlord must provide relocation assistance
+   equal to ONE MONTH'S RENT to Tenant before or at time of notice.
+
+D. SELF-HELP REMEDIES PROHIBITED:
+   Landlord may NOT:
+   - Change locks without court order
+   - Remove Tenant's belongings without court order
+   - Shut off utilities to force Tenant to leave
+   - Harass or threaten Tenant
+   Violations may result in penalties of $100/day plus actual damages.
+   (California Civil Code Section 789.3)
+
+E. CONTRA COSTA COUNTY RENT BOARD:
+   Unincorporated areas of Contra Costa County and some cities have
+   additional tenant protections. Contact the County for current ordinances.
+   Contra Costa County: (925) 655-2000
+
+F. LEGAL AID AND MEDIATION:
+   Bay Area Legal Aid: (415) 982-1300
+   Contra Costa County Bar Association Lawyer Referral: (925) 686-6900
+   Community Mediation Services: (925) 691-4488
+
+================================================================================
 MOVE-IN CHECKLIST
 ================================================================================
 
@@ -649,7 +761,7 @@ LANDLORD: A Phoenix Enterprises LLC
 
 Signature: _________________________________  Date: ________________
 Robert Maagdenberg, Authorized Agent/Property Manager
-CalDRE License: [Insert Number]
+CalDRE Broker License #: 01432017
 
 TENANT: ${tenant.first_name} ${tenant.last_name}
 
