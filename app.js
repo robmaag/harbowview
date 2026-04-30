@@ -267,7 +267,7 @@ Date Prepared: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month
 This agreement is entered into by and between:
 
 LANDLORD/PROPERTY MANAGER:
-Name: A Phoenix Enterprises LLC
+Name: A Phoenix Enterprise LLC
 Address: Concord, CA 94520
 Phone: (408) 373-4038
 Email: management@aphoenixenterprises.com
@@ -313,7 +313,7 @@ C. HOLDOVER: If Tenant remains in possession after expiration without
 A. AMOUNT: Monthly rent is $${parseFloat(monthly_rent).toFixed(2)}, due and payable on the 1st day
    of each calendar month.
 
-B. PAYMENT METHOD: Rent shall be paid via the A Phoenix Enterprises tenant
+B. PAYMENT METHOD: Rent shall be paid via the A Phoenix Enterprise tenant
    portal at https://melodic-griffin-a29a8a.netlify.app or via PayPal to
    @APhoenixEnterprise (paypal.me/robertmaagdenberg1).
 
@@ -757,7 +757,7 @@ SIGNATURES
 By signing below, both parties agree to all terms of this Residential Lease
 Agreement and acknowledge receipt of all required disclosures.
 
-LANDLORD: A Phoenix Enterprises LLC
+LANDLORD: A Phoenix Enterprise LLC
 
 Signature: _________________________________  Date: ________________
 Robert Maagdenberg, Authorized Agent/Property Manager
