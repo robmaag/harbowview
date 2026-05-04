@@ -8,11 +8,13 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const evaluationsRouter = require('./routes/evaluations');
 
 const app = express();
 app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/evaluations', evaluationsRouter);
 
 const pool = mysql.createPool({
   host:     process.env.MYSQLHOST     || 'mysql.railway.internal',
