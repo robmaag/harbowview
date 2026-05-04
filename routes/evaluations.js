@@ -17,7 +17,8 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 5,
 });
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+//const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('./auth');
 const { computeEvaluation }         = require('../middleware/scorer');
 
 // ── GET /api/evaluations — list all (admin) ────────────────────────
