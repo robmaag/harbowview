@@ -6,7 +6,17 @@
 //   app.use('/api/evaluations', evaluationsRouter);
 
 const router = require('express').Router();
-const db     = require('../database/db');
+// const db     = require('../database/db');
+const mysql = require('mysql2/promise');
+const db = mysql.createPool({
+  host:     process.env.MYSQLHOST     || 'mysql.railway.internal',
+  port:     parseInt(process.env.MYSQLPORT) || 3306,
+  database: process.env.MYSQL_DATABASE || 'railway',
+  user:     process.env.MYSQLUSER     || 'root',
+  password: process.env.MYSQLPASSWORD || '',
+  waitForConnections: true,
+  connectionLimit: 5,
+});
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { computeEvaluation }         = require('../middleware/scorer');
 
