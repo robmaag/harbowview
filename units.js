@@ -4,7 +4,8 @@
 // Preserves existing GET /units and GET /units/:id exactly
 
 const router  = require('express').Router();
-const db      = require('../database/db');
+// Smart path detection — works from root OR routes/ folder
+const db = require(require('path').join(process.cwd(), 'database', 'db'));
 const jwt     = require('jsonwebtoken');
 const multer  = require('multer');
 const path    = require('path');
@@ -13,7 +14,7 @@ const fs      = require('fs');
 // ── Multer storage — saves to /app/uploads/units/ ────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'units');
+    const dir = path.join(process.cwd(), 'uploads', 'units');
     fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
@@ -202,7 +203,7 @@ router.delete('/:id/photos/:photoId', requireAdmin, async (req, res) => {
     if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
     // Delete file from disk
-    const fullPath = path.join(__dirname, '..', photo.filepath);
+    const fullPath = path.join(process.cwd(), photo.filepath);
     if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
 
     await db.query('DELETE FROM unit_photos WHERE id = ?', [req.params.photoId]);
@@ -245,7 +246,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
     // Delete photo files from disk
     const [photos] = await conn.query('SELECT filepath FROM unit_photos WHERE unit_id = ?', [req.params.id]);
     for (const p of photos) {
-      const fp = path.join(__dirname, '..', p.filepath);
+      const fp = path.join(process.cwd(), p.filepath);
       if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
     }
 
