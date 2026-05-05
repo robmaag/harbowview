@@ -7,32 +7,10 @@ const router  = require('express').Router();
 // Smart path detection — works from root OR routes/ folder
 const db = require(require('path').join(process.cwd(), 'database', 'db'));
 const jwt     = require('jsonwebtoken');
-const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
 
-// ── Multer storage — saves to /app/uploads/units/ ────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(process.cwd(), 'uploads', 'units');
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const ext  = path.extname(file.originalname).toLowerCase();
-    const name = `unit_${req.params.id || 'new'}_${Date.now()}${ext}`;
-    cb(null, name);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    const ok = /jpeg|jpg|png|webp|gif/.test(file.mimetype);
-    cb(ok ? null : new Error('Only image files are allowed'), ok);
-  }
-});
+// Photo upload requires multer — install with: npm install multer
 
 // ── Auth middleware ───────────────────────────────────────────────
 const requireAdmin = (req, res, next) => {
@@ -168,29 +146,9 @@ router.put('/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// ── POST /units/:id/photos — upload photo ─────────────────────────
-router.post('/:id/photos', requireAdmin, upload.single('photo'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ success: false, error: 'No image file provided' });
-
-    // Check if this is first photo — make it primary
-    const [[{ count }]] = await db.query('SELECT COUNT(*) AS count FROM unit_photos WHERE unit_id = ?', [req.params.id]);
-    const isPrimary = count === 0 ? 1 : 0;
-
-    const filepath = `/uploads/units/${req.file.filename}`;
-    const [result] = await db.query(
-      'INSERT INTO unit_photos (unit_id, filepath, is_primary, caption) VALUES (?, ?, ?, ?)',
-      [req.params.id, filepath, isPrimary, req.body.caption || null]
-    );
-
-    res.status(201).json({
-      success: true,
-      photo: { id: result.insertId, filepath, is_primary: isPrimary }
-    });
-  } catch (err) {
-    console.error('[POST /units/:id/photos]', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
+// ── POST /units/:id/photos — upload photo (stub — install multer first) ──
+router.post('/:id/photos', requireAdmin, async (req, res) => {
+  res.status(501).json({ success: false, error: 'Photo upload coming soon — multer not yet installed' });
 });
 
 // ── DELETE /units/:id/photos/:photoId — remove one photo ──────────
