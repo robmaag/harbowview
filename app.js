@@ -144,7 +144,7 @@ app.post('/api/units', authMiddleware, adminOnly, async (req, res) => {
     const [existing] = await pool.query('SELECT id FROM units WHERE unit_number = ? LIMIT 1', [unit_number]);
     if (existing.length) return res.status(409).json({ success: false, message: `Unit ${unit_number} already exists` });
     const [result] = await pool.query(
-      'INSERT INTO units (unit_number, floor, monthly_rent, bedrooms, bathrooms, sq_ft, status, description, amenities) VALUES (?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO units (unit_number, floor, monthly_rent, bedrooms, bathrooms, sqft, status, description, amenities) VALUES (?,?,?,?,?,?,?,?,?)',
       [String(unit_number).trim(), floor ? parseInt(floor) : null, parseFloat(monthly_rent), parseInt(bedrooms)||0, parseFloat(bathrooms)||1, sq_ft ? parseInt(sq_ft) : null, status||'available', description||null, JSON.stringify(Array.isArray(amenities) ? amenities : [])]
     );
     res.status(201).json({ success: true, id: result.insertId, message: `Unit ${unit_number} created` });
