@@ -137,7 +137,31 @@ app.get('/api/units/:id', async (req, res) => {
     res.json({ success: true, unit, photos, reviews });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+app.post('/api/units', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { unit_number, floor, monthly_rent, bedrooms, bathrooms, sq_ft, status, description, amenities } = req.body;
+    if (!unit_number || !monthly_rent) return res.status(400).json({ success: false, message: 'unit_number and monthly_rent are required' });
+    const [existing] = await pool.query('SELECT id FROM units WHERE unit_number = ? LIMIT 1', [unit_number]);
+    if (existing.length) return res.status(409).json({ success: false, message: `Unit ${unit_number} already exists` });
+    const [result] = await pool.query(
+      'INSERT INTO units (unit_number, floor, monthly_rent, bedrooms, bathrooms, sq_ft, status, description, amenities) VALUES (?,?,?,?,?,?,?,?,?)',
+      [String(unit_number).trim(), floor ? parseInt(floor) : null, parseFloat(monthly_rent), parseInt(bedrooms)||0, parseFloat(bathrooms)||1, sq_ft ? parseInt(sq_ft) : null, status||'available', description||null, JSON.stringify(Array.isArray(amenities) ? amenities : [])]
+    );
+    res.status(201).json({ success: true, id: result.insertId, message: `Unit ${unit_number} created` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 
+app.delete('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM units WHERE id=?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
+    const [activeLease] = await pool.query("SELECT id FROM leases WHERE unit_id=? AND status='active' LIMIT 1", [req.params.id]);
+    if (activeLease.length) return res.status(409).json({ success: false, message: `Cannot delete Unit ${rows[0].unit_number} — it has an active lease` });
+    await pool.query('DELETE FROM unit_photos WHERE unit_id=?', [req.params.id]);
+    await pool.query('DELETE FROM units WHERE id=?', [req.params.id]);
+    res.json({ success: true, message: `Unit ${rows[0].unit_number} deleted` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photos', 20), async (req, res) => {
   try {
     const unitId = req.params.id;
