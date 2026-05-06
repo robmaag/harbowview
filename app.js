@@ -162,7 +162,7 @@ app.delete('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
     res.json({ success: true, message: `Unit ${rows[0].unit_number} deleted` });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
-app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photos', 20), async (req, res) => {
+app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photos', 100), async (req, res) => {
   try {
     const unitId = req.params.id;
     const [existing] = await pool.query('SELECT COUNT(*) as cnt FROM unit_photos WHERE unit_id=?', [unitId]);
@@ -182,7 +182,7 @@ app.put('/api/units/:id/photos/:photoId/primary', authMiddleware, adminOnly, asy
 app.delete('/api/units/:id/photos/:photoId', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM unit_photos WHERE id=? AND unit_id=?', [req.params.photoId, req.params.id]);
-    if (!rows.length) return res.status(404).json({ success: false, message: 'Photo not found' });
+    if (!rows.length) return res.json({ success: true, message: 'Already removed' }); // ← changed 404 to success
     const fp = path.join(__dirname, 'uploads', rows[0].filename || path.basename(rows[0].filepath||''));
     if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
     await pool.query('DELETE FROM unit_photos WHERE id=?', [req.params.photoId]);
@@ -190,6 +190,8 @@ app.delete('/api/units/:id/photos/:photoId', authMiddleware, adminOnly, async (r
     res.json({ success: true, message: 'Photo deleted' });
   } catch(e) { res.status(500).json({ success: false, message: e.message }); }
 });
+
+
 app.put('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { unit_number, building_name, floor, bedrooms, bathrooms, sqft, monthly_rent, deposit, description, amenities, status } = req.body;
