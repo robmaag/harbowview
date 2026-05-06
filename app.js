@@ -171,7 +171,28 @@ app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photo
     res.json({ success: true, message: `${req.files.length} photos uploaded` });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+app.put('/api/units/:id/photos/:photoId/primary', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query('UPDATE unit_photos SET is_primary=0 WHERE unit_id=?', [req.params.id]);
+    await pool.query('UPDATE unit_photos SET is_primary=1 WHERE id=? AND unit_id=?', [req.params.photoId, req.params.id]);
+    res.json({ success: true, message: 'Primary photo updated' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 
+app.delete('/api/units/:id/photos/:photoId', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [photos] = await pool.query('SELECT * FROM unit_photos WHERE id=? AND unit_id=?', [req.params.photoId, req.params.id]);
+    if (!photos.length) return res.status(404).json({ success: false, message: 'Photo not found' });
+    const photo = photos[0];
+    const filePath = path.join(__dirname, 'uploads', photo.filename || path.basename(photo.filepath || ''));
+    if (fs.existsSync(filePath)) { try { fs.unlinkSync(filePath); } catch {} }
+    await pool.query('DELETE FROM unit_photos WHERE id=?', [req.params.photoId]);
+    if (photo.is_primary) {
+      await pool.query('UPDATE unit_photos SET is_primary=1 WHERE unit_id=? ORDER BY sort_order ASC LIMIT 1', [req.params.id]);
+    }
+    res.json({ success: true, message: 'Photo deleted' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 app.put('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { unit_number, building_name, floor, bedrooms, bathrooms, sqft, monthly_rent, deposit, description, amenities, status } = req.body;
