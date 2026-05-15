@@ -133,7 +133,7 @@ app.get('/api/units/:id', async (req, res) => {
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
     // FIX: removed ORDER BY sort_order — column does not exist
-    const [photos] = await pool.query('SELECT * FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC, created_at ASC', [req.params.id]);
+    const [photos] = await pool.query('SELECT * FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC', [req.params.id]);
     const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
     res.json({ success: true, unit, photos, reviews });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -194,7 +194,7 @@ app.delete('/api/units/:id/photos/:photoId', authMiddleware, adminOnly, async (r
     const fp = path.join(__dirname, 'uploads', rows[0].filename || path.basename(rows[0].filepath||''));
     if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
     await pool.query('DELETE FROM unit_photos WHERE id=?', [req.params.photoId]);
-    if (rows[0].is_primary) await pool.query('UPDATE unit_photos SET is_primary=1 WHERE unit_id=? ORDER BY created_at ASC LIMIT 1', [req.params.id]);
+    if (rows[0].is_primary) await pool.query('UPDATE unit_photos SET is_primary=1 WHERE unit_id=? LIMIT 1', [req.params.id]);
     res.json({ success: true, message: 'Photo deleted' });
   } catch(e) { res.status(500).json({ success: false, message: e.message }); }
 });
