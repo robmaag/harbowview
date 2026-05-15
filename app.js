@@ -132,7 +132,8 @@ app.get('/api/units/:id', async (req, res) => {
     if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
-    const [photos] = await pool.query('SELECT * FROM unit_photos WHERE unit_id=? ORDER BY sort_order ASC', [req.params.id]);
+    // FIX: removed ORDER BY sort_order — column does not exist
+    const [photos] = await pool.query('SELECT * FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC, created_at ASC', [req.params.id]);
     const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
     res.json({ success: true, unit, photos, reviews });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -162,15 +163,22 @@ app.delete('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
     res.json({ success: true, message: `Unit ${rows[0].unit_number} deleted` });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+
+// FIX: removed sort_order from INSERT — column does not exist in unit_photos table
 app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photos', 100), async (req, res) => {
   try {
     const unitId = req.params.id;
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No files uploaded' });
+    }
     const [existing] = await pool.query('SELECT COUNT(*) as cnt FROM unit_photos WHERE unit_id=?', [unitId]);
-    const inserts = req.files.map((f, i) => [unitId, f.filename, `/uploads/${f.filename}`, req.body[`caption_${i}`] || null, i, existing[0].cnt === 0 && i === 0 ? 1 : 0]);
-    await pool.query('INSERT INTO unit_photos (unit_id,filename,filepath,caption,sort_order,is_primary) VALUES ?', [inserts]);
+    const hasExisting = existing[0].cnt > 0;
+    const inserts = req.files.map((f, i) => [unitId, f.filename, `/uploads/${f.filename}`, req.body[`caption_${i}`] || null, (!hasExisting && i === 0) ? 1 : 0]);
+    await pool.query('INSERT INTO unit_photos (unit_id, filename, filepath, caption, is_primary) VALUES ?', [inserts]);
     res.json({ success: true, message: `${req.files.length} photos uploaded` });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+
 app.put('/api/units/:id/photos/:photoId/primary', authMiddleware, adminOnly, async (req, res) => {
   try {
     await pool.query('UPDATE unit_photos SET is_primary=0 WHERE unit_id=?', [req.params.id]);
@@ -182,15 +190,14 @@ app.put('/api/units/:id/photos/:photoId/primary', authMiddleware, adminOnly, asy
 app.delete('/api/units/:id/photos/:photoId', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM unit_photos WHERE id=? AND unit_id=?', [req.params.photoId, req.params.id]);
-    if (!rows.length) return res.json({ success: true, message: 'Already removed' }); // ← changed 404 to success
+    if (!rows.length) return res.json({ success: true, message: 'Already removed' });
     const fp = path.join(__dirname, 'uploads', rows[0].filename || path.basename(rows[0].filepath||''));
     if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
     await pool.query('DELETE FROM unit_photos WHERE id=?', [req.params.photoId]);
-    if (rows[0].is_primary) await pool.query('UPDATE unit_photos SET is_primary=1 WHERE unit_id=? ORDER BY sort_order ASC LIMIT 1', [req.params.id]);
+    if (rows[0].is_primary) await pool.query('UPDATE unit_photos SET is_primary=1 WHERE unit_id=? ORDER BY created_at ASC LIMIT 1', [req.params.id]);
     res.json({ success: true, message: 'Photo deleted' });
   } catch(e) { res.status(500).json({ success: false, message: e.message }); }
 });
-
 
 app.put('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
