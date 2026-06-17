@@ -309,6 +309,64 @@ app.put('/api/applications/:id', authMiddleware, adminOnly, async (req, res) => 
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// APPLICATION DOCUMENTS
+app.post('/api/applications/:id/documents', upload.array('documents', 10), async (req, res) => {
+  try {
+    const appId = req.params.id;
+    const [apps] = await pool.query('SELECT id, first_name, last_name FROM applications WHERE id=?', [appId]);
+    if (!apps.length) return res.status(404).json({ success: false, message: 'Application not found' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ success: false, message: 'No files uploaded' });
+    const docType = req.body.doc_type || 'application_document';
+    const applicantName = `${apps[0].first_name} ${apps[0].last_name}`;
+    for (const f of req.files) {
+      const fileData = fs.readFileSync(f.path);
+      const base64Data = fileData.toString('base64');
+      const dataUrl = `data:${f.mimetype};base64,${base64Data}`;
+      await pool.query(
+        'INSERT INTO documents (owner_id, related_type, title, filename, filepath, file_size, mime_type, uploaded_by) VALUES (?,?,?,?,?,?,?,?)',
+        [appId, 'application', `${docType} — ${applicantName}`, f.filename, dataUrl, f.size, f.mimetype, 0]
+      );
+      try { fs.unlinkSync(f.path); } catch {}
+    }
+    res.json({ success: true, message: `${req.files.length} document(s) uploaded` });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.get('/api/applications/:id/documents', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, title, filename, file_size, mime_type, uploaded_at FROM documents WHERE owner_id=? AND related_type='application' ORDER BY uploaded_at DESC",
+      [req.params.id]
+    );
+    res.json({ success: true, documents: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.get('/api/applications/:id/documents/:docId/view', async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM documents WHERE id=? AND owner_id=? AND related_type='application'", [req.params.docId, req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Document not found' });
+    const doc = rows[0];
+    if (doc.filepath && doc.filepath.startsWith('data:')) {
+      const matches = doc.filepath.match(/^data:(.+);base64,(.+)$/);
+      if (matches) {
+        const buf = Buffer.from(matches[2], 'base64');
+        res.set('Content-Type', matches[1]);
+        res.set('Content-Disposition', `inline; filename="${doc.filename}"`);
+        return res.send(buf);
+      }
+    }
+    res.status(404).json({ success: false, message: 'File data not found' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.delete('/api/applications/:id/documents/:docId', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query("DELETE FROM documents WHERE id=? AND owner_id=? AND related_type='application'", [req.params.docId, req.params.id]);
+    res.json({ success: true, message: 'Document deleted' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 // LEASES
 app.get('/api/leases', authMiddleware, async (req, res) => {
   try {
