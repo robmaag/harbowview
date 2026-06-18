@@ -1198,8 +1198,15 @@ app.post('/api/documents', authMiddleware, upload.single('file'), async (req, re
 
 app.get('/api/documents/all', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const [rows] = await pool.query(`SELECT d.*, u.first_name, u.last_name FROM documents d LEFT JOIN users u ON d.owner_id=u.id ORDER BY d.uploaded_at DESC`);
+    const [rows] = await pool.query(`SELECT d.*, u.first_name, u.last_name, u.email FROM documents d LEFT JOIN users u ON d.owner_id=u.id WHERE d.related_type != 'application' ORDER BY d.uploaded_at DESC`);
     res.json({ success: true, documents: rows });
+  } catch(e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.delete('/api/documents/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM documents WHERE id=?', [req.params.id]);
+    res.json({ success: true, message: 'Document deleted' });
   } catch(e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
