@@ -1003,7 +1003,7 @@ app.post('/api/invoices/generate-monthly', authMiddleware, adminOnly, async (req
 app.post('/api/invoices/generate-utility', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { tenant_id, lease_id, utility_type, amount, due_date, period_start, period_end, meter_reading_start, meter_reading_end, utility_rate, notes } = req.body;
-    const utilityLabels = { gas_electric: 'Gas & Electric', water: 'Water', internet_tv: 'Internet/TV', garbage: 'Garbage Collection' };
+    const utilityLabels = { gas: 'Gas', electric: 'Electric', water: 'Water', internet: 'Internet', tv: 'Cable/TV', garbage: 'Garbage Collection', gas_electric: 'Gas & Electric', internet_tv: 'Internet/TV' };
     const label = utilityLabels[utility_type] || utility_type;
     const [result] = await pool.query('INSERT INTO invoices (tenant_id,lease_id,invoice_type,description,amount,due_date,period_start,period_end,meter_reading_start,meter_reading_end,utility_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [tenant_id, lease_id, utility_type, `${label}${notes ? ' - ' + notes : ''}`, amount, due_date, period_start, period_end, meter_reading_start || null, meter_reading_end || null, utility_rate || null]);
