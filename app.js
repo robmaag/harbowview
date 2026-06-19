@@ -309,6 +309,24 @@ app.put('/api/applications/:id', authMiddleware, adminOnly, async (req, res) => 
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+app.put('/api/applications/:id/details', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const fields = ['phone','dob','ssn_last4','current_address','desired_movein','num_occupants','pets','employment_status','employer_name','employer_address','employer_phone','supervisor_name','job_title','employment_start','annual_income','additional_income','prev_address1','prev_rent1','prev_duration1','prev_landlord1','prev_landlord_phone1','prev_reason1','prev_address2','prev_rent2','prev_duration2','prev_landlord2','prev_landlord_phone2','ever_evicted','ever_broken_lease','rental_notes','ref1_name','ref1_relationship','ref1_phone','ref1_email','ref2_name','ref2_relationship','ref2_phone','ref2_email'];
+    const updates = [];
+    const values = [];
+    for (const f of fields) {
+      if (req.body[f] !== undefined) {
+        updates.push(`${f}=?`);
+        values.push(req.body[f] === '' ? null : req.body[f]);
+      }
+    }
+    if (!updates.length) return res.status(400).json({ success: false, message: 'No fields to update' });
+    values.push(req.params.id);
+    await pool.query(`UPDATE applications SET ${updates.join(',')} WHERE id=?`, values);
+    res.json({ success: true, message: 'Application details updated' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 // APPLICATION DOCUMENTS
 app.post('/api/applications/:id/documents', upload.array('documents', 10), async (req, res) => {
   try {
