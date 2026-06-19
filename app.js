@@ -327,6 +327,82 @@ app.put('/api/applications/:id/details', authMiddleware, adminOnly, async (req, 
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// SCREENING FEES (per-application, since applicants don't have user accounts yet)
+pool.query(`CREATE TABLE IF NOT EXISTS screening_fees (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  application_id INT NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  actual_cost DECIMAL(10,2) DEFAULT NULL,
+  description VARCHAR(255) DEFAULT 'Tenant Screening / Credit Check Fee',
+  status ENUM('pending','paid','refunded','partial_refund') DEFAULT 'pending',
+  payment_method VARCHAR(50),
+  paid_at TIMESTAMP NULL,
+  refund_amount DECIMAL(10,2) DEFAULT 0,
+  refunded_at TIMESTAMP NULL,
+  notes TEXT,
+  created_by INT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (application_id) REFERENCES applications(id)
+)`).catch(e => console.error('screening_fees table error:', e.message));
+
+app.post('/api/applications/:id/screening-fee', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { amount, description } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Amount is required' });
+    if (amount > 65.86) return res.status(400).json({ success: false, message: 'Amount exceeds California\'s 2026 screening fee cap of $65.86' });
+    const [result] = await pool.query(
+      'INSERT INTO screening_fees (application_id, amount, description, created_by) VALUES (?,?,?,?)',
+      [req.params.id, amount, description || 'Tenant Screening / Credit Check Fee', req.user.id]
+    );
+    res.status(201).json({ success: true, fee_id: result.insertId, message: 'Screening fee invoice created' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.get('/api/applications/:id/screening-fee', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM screening_fees WHERE application_id=? ORDER BY created_at DESC', [req.params.id]);
+    res.json({ success: true, fees: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.get('/api/screening-fees', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT sf.*, a.first_name, a.last_name, a.email, a.unit_id, u.unit_number FROM screening_fees sf JOIN applications a ON sf.application_id=a.id LEFT JOIN units u ON a.unit_id=u.id ORDER BY sf.created_at DESC`);
+    res.json({ success: true, fees: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.post('/api/screening-fees/:feeId/mark-paid', async (req, res) => {
+  try {
+    const { payment_method } = req.body;
+    await pool.query("UPDATE screening_fees SET status='paid', payment_method=?, paid_at=NOW() WHERE id=?", [payment_method || 'unspecified', req.params.feeId]);
+    res.json({ success: true, message: 'Marked as paid' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.put('/api/screening-fees/:feeId/refund', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { actual_cost, notes } = req.body;
+    const [rows] = await pool.query('SELECT * FROM screening_fees WHERE id=?', [req.params.feeId]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Fee not found' });
+    const fee = rows[0];
+    const refundAmount = Math.max(0, parseFloat(fee.amount) - parseFloat(actual_cost || 0));
+    const status = refundAmount >= parseFloat(fee.amount) ? 'refunded' : (refundAmount > 0 ? 'partial_refund' : 'paid');
+    await pool.query(
+      'UPDATE screening_fees SET actual_cost=?, refund_amount=?, status=?, refunded_at=?, notes=? WHERE id=?',
+      [actual_cost, refundAmount, status, refundAmount > 0 ? new Date() : null, notes || null, req.params.feeId]
+    );
+    res.json({ success: true, refund_amount: refundAmount, message: refundAmount > 0 ? `Refund of $${refundAmount.toFixed(2)} recorded` : 'No refund owed — actual cost covered full fee' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+app.delete('/api/screening-fees/:feeId', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM screening_fees WHERE id=?', [req.params.feeId]);
+    res.json({ success: true, message: 'Screening fee deleted' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 // APPLICATION DOCUMENTS
 app.post('/api/applications/:id/documents', upload.array('documents', 10), async (req, res) => {
   try {
