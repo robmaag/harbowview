@@ -247,12 +247,22 @@ app.post('/api/reviews', authMiddleware, async (req, res) => {
 // TOURS
 app.get('/api/tours', authMiddleware, async (req, res) => {
   try {
-    let sql = `SELECT t.*, u.unit_number, u.building_name, usr.first_name, usr.last_name, usr.email FROM tour_requests t JOIN units u ON t.unit_id=u.id JOIN users usr ON t.tenant_id=usr.id WHERE 1=1`;
+    let sql = `SELECT t.*, u.unit_number, u.building_name, usr.first_name, usr.last_name, usr.email as user_email
+               FROM tour_requests t
+               LEFT JOIN units u ON t.unit_id=u.id
+               LEFT JOIN users usr ON t.tenant_id=usr.id
+               WHERE 1=1`;
     const params = [];
     if (req.user.role !== 'admin') { sql += ' AND t.tenant_id=?'; params.push(req.user.id); }
     sql += ' ORDER BY t.preferred_date ASC';
     const [rows] = await pool.query(sql, params);
-    res.json({ success: true, tours: rows });
+    // Merge name/email: prefer stored name/email on the tour record itself (guest submissions)
+    const tours = rows.map(t => ({
+      ...t,
+      name: t.name || (t.first_name ? `${t.first_name} ${t.last_name}` : 'Unknown'),
+      email: t.email || t.user_email || '—'
+    }));
+    res.json({ success: true, tours });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -263,6 +273,13 @@ app.post('/api/tours', async (req, res) => {
     res.status(201).json({ success: true, tour_id: result.insertId });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+
+// Ensure tour_requests has guest fields
+pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS name VARCHAR(255)').catch(()=>{});
+pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS email VARCHAR(255)').catch(()=>{});
+pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS phone VARCHAR(50)').catch(()=>{});
+pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS preferred_time VARCHAR(50)').catch(()=>{});
+pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS admin_notes TEXT').catch(()=>{});
 
 app.put('/api/tours/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
