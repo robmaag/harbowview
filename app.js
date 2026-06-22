@@ -266,20 +266,37 @@ app.get('/api/tours', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// Migrate tour_requests table to ensure all guest columns exist
+async function migrateTourRequests(){
+  const migrations=[
+    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS name VARCHAR(255)`,
+    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
+    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS phone VARCHAR(50)`,
+    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS preferred_time VARCHAR(50)`,
+    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS admin_notes TEXT`,
+    `ALTER TABLE tour_requests MODIFY COLUMN IF EXISTS status VARCHAR(50) DEFAULT 'pending'`
+  ];
+  for(const sql of migrations){
+    await pool.query(sql).catch(e=>console.log('Tour migration skipped:',e.message));
+  }
+}
+migrateTourRequests();
+
 app.post('/api/tours', async (req, res) => {
   try {
     const { unit_id, tenant_id, name, email, phone, preferred_date, preferred_time } = req.body;
-    const [result] = await pool.query('INSERT INTO tour_requests (unit_id,tenant_id,name,email,phone,preferred_date,preferred_time) VALUES (?,?,?,?,?,?,?)', [unit_id, tenant_id || null, name, email, phone, preferred_date, preferred_time]);
+    if(!name||!email) return res.status(400).json({success:false,message:'Name and email are required'});
+    const [result] = await pool.query(
+      `INSERT INTO tour_requests (unit_id, tenant_id, name, email, phone, preferred_date, preferred_time, status)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [unit_id||null, tenant_id||null, name, email, phone||null, preferred_date||null, preferred_time||null, 'pending']
+    );
     res.status(201).json({ success: true, tour_id: result.insertId });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch(e){
+    console.error('Tour insert error:', e.message);
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
-
-// Ensure tour_requests has guest fields
-pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS name VARCHAR(255)').catch(()=>{});
-pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS email VARCHAR(255)').catch(()=>{});
-pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS phone VARCHAR(50)').catch(()=>{});
-pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS preferred_time VARCHAR(50)').catch(()=>{});
-pool.query('ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS admin_notes TEXT').catch(()=>{});
 
 app.put('/api/tours/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
