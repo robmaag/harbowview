@@ -269,6 +269,7 @@ app.get('/api/tours', authMiddleware, async (req, res) => {
 // Migrate tour_requests table to ensure all guest columns exist
 async function migrateTourRequests(){
   const migrations=[
+    `ALTER TABLE tour_requests MODIFY COLUMN unit_id INT NULL`,
     `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS name VARCHAR(255)`,
     `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
     `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS phone VARCHAR(50)`,
