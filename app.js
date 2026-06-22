@@ -275,7 +275,7 @@ app.put('/api/tours/:id', authMiddleware, adminOnly, async (req, res) => {
 // APPLICATIONS
 app.post('/api/applications', async (req, res) => {
   try {
-    const fields = ['unit_id','first_name','last_name','email','phone','dob','ssn_last4','current_address','desired_movein','num_occupants','pets','employment_status','employer_name','employer_address','employer_phone','supervisor_name','job_title','employment_start','annual_income','additional_income','prev_address1','prev_rent1','prev_duration1','prev_landlord1','prev_landlord_phone1','prev_reason1','prev_address2','prev_rent2','prev_duration2','prev_landlord2','prev_landlord_phone2','ever_evicted','ever_broken_lease','rental_notes','ref1_name','ref1_relationship','ref1_phone','ref1_email','ref2_name','ref2_relationship','ref2_phone','ref2_email','signature','signed_date'];
+    const fields = ['unit_id','first_name','last_name','email','phone','dob','ssn_last4','current_address','desired_movein','num_occupants','pets','employment_status','employer_name','employer_address','employer_phone','supervisor_name','job_title','employment_start','annual_income','additional_income','prev_address1','prev_rent1','prev_duration1','prev_landlord1','prev_landlord_phone1','prev_reason1','prev_address2','prev_rent2','prev_duration2','prev_landlord2','prev_landlord_phone2','ever_evicted','ever_broken_lease','rental_notes','ref1_name','ref1_relationship','ref1_phone','ref1_email','ref2_name','ref2_relationship','ref2_phone','ref2_email','signature','signed_date','renters_insurance'];
     const values = fields.map(f => req.body[f] ?? null);
     const [result] = await pool.query(`INSERT INTO applications (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`, values);
     res.status(201).json({ success: true, application_id: result.insertId, reference: `HV-${new Date().getFullYear()}-${String(result.insertId).padStart(4, '0')}` });
@@ -1340,6 +1340,9 @@ app.get('/api/admin/reports/revenue', authMiddleware, adminOnly, async (req, res
 
 // BACKGROUND CHECKS
 pool.query(`CREATE TABLE IF NOT EXISTS background_checks (id INT AUTO_INCREMENT PRIMARY KEY, tenant_id INT NOT NULL, agency_used VARCHAR(100), credit_score INT DEFAULT NULL, overall_result ENUM('approved','conditional','denied','pending') DEFAULT 'pending', criminal_record ENUM('clear','minor','disqualifying') DEFAULT 'clear', eviction_history ENUM('none','dismissed','found') DEFAULT 'none', notes TEXT, visible_to_tenant BOOLEAN DEFAULT FALSE, completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_by INT, FOREIGN KEY (tenant_id) REFERENCES users(id), FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL)`).catch(e => console.error('BG table error:', e.message));
+
+// Add renters_insurance column if it doesn't exist yet
+pool.query(`ALTER TABLE applications ADD COLUMN IF NOT EXISTS renters_insurance VARCHAR(50) DEFAULT 'not_answered'`).catch(()=>{});
 
 app.get('/api/background/all', authMiddleware, adminOnly, async (req, res) => {
   try {
