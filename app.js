@@ -307,6 +307,13 @@ app.put('/api/tours/:id', authMiddleware, adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+app.delete('/api/tours/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM tour_requests WHERE id=?', [req.params.id]);
+    res.json({ success: true, message: 'Tour request deleted' });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 // APPLICATIONS
 app.post('/api/applications', async (req, res) => {
   try {
