@@ -27,8 +27,8 @@ const pool = mysql.createPool({
 });
 
 pool.getConnection()
-  .then(c => { console.log('✅ MySQL connected'); c.release(); })
-  .catch(e => console.error('❌ MySQL error:', e.message));
+  .then(c => { console.log('MySQL connected'); c.release(); })
+  .catch(e => console.error('MySQL error:', e.message));
 
 const SECRET = process.env.JWT_SECRET || 'harborview_secret_2026';
 const makeToken = (id) => jwt.sign({ userId: id }, SECRET, { expiresIn: '7d' });
@@ -132,8 +132,6 @@ app.get('/api/units/:id', async (req, res) => {
     if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
-    // FIX: removed ORDER BY sort_order — column does not exist
-    // Returns filepath which is now a base64 data URL stored permanently in MySQL
     const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC', [req.params.id]);
     const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
     res.json({ success: true, unit, photos, reviews });
@@ -165,7 +163,6 @@ app.delete('/api/units/:id', authMiddleware, adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-// FIX: Store photos as base64 in MySQL — permanent storage, survives redeploys
 app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photos', 100), async (req, res) => {
   try {
     const unitId = req.params.id;
@@ -177,7 +174,6 @@ app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photo
     for (let i = 0; i < req.files.length; i++) {
       const f = req.files[i];
       const isPrimary = (!hasExisting && i === 0) ? 1 : 0;
-      // Read file as base64 and store in DB for permanent persistence
       const fileData = fs.readFileSync(f.path);
       const base64Data = fileData.toString('base64');
       const mimeType = f.mimetype;
@@ -186,7 +182,6 @@ app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photo
         'INSERT INTO unit_photos (unit_id, filename, filepath, caption, is_primary, photo_data) VALUES (?,?,?,?,?,?)',
         [unitId, f.filename, dataUrl, req.body[`caption_${i}`] || null, isPrimary, fileData]
       );
-      // Clean up temp file from disk
       try { fs.unlinkSync(f.path); } catch {}
     }
     res.json({ success: true, message: `${req.files.length} photo(s) uploaded successfully` });
@@ -208,7 +203,6 @@ app.delete('/api/units/:id/photos/:photoId', authMiddleware, adminOnly, async (r
   try {
     const [rows] = await pool.query('SELECT * FROM unit_photos WHERE id=? AND unit_id=?', [req.params.photoId, req.params.id]);
     if (!rows.length) return res.json({ success: true, message: 'Already removed' });
-    // Only try to delete from disk if filepath is a real path (not base64)
     if (rows[0].filepath && !rows[0].filepath.startsWith('data:')) {
       const fp = path.join(__dirname, 'uploads', rows[0].filename || path.basename(rows[0].filepath||''));
       if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
@@ -256,7 +250,6 @@ app.get('/api/tours', authMiddleware, async (req, res) => {
     if (req.user.role !== 'admin') { sql += ' AND t.tenant_id=?'; params.push(req.user.id); }
     sql += ' ORDER BY t.preferred_date ASC';
     const [rows] = await pool.query(sql, params);
-    // Merge name/email: prefer stored name/email on the tour record itself (guest submissions)
     const tours = rows.map(t => ({
       ...t,
       name: t.name || (t.first_name ? `${t.first_name} ${t.last_name}` : 'Unknown'),
@@ -266,7 +259,6 @@ app.get('/api/tours', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-// Migrate tour_requests table to ensure all guest columns exist
 async function migrateTourRequests(){
   const migrations=[
     `ALTER TABLE tour_requests MODIFY COLUMN unit_id INT NULL`,
@@ -369,7 +361,7 @@ app.put('/api/applications/:id/details', authMiddleware, adminOnly, async (req, 
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-// SCREENING FEES (per-application, since applicants don't have user accounts yet)
+// SCREENING FEES
 pool.query(`CREATE TABLE IF NOT EXISTS screening_fees (
   id INT AUTO_INCREMENT PRIMARY KEY,
   application_id INT NOT NULL,
@@ -1383,8 +1375,25 @@ app.get('/api/admin/reports/revenue', authMiddleware, adminOnly, async (req, res
 // BACKGROUND CHECKS
 pool.query(`CREATE TABLE IF NOT EXISTS background_checks (id INT AUTO_INCREMENT PRIMARY KEY, tenant_id INT NOT NULL, agency_used VARCHAR(100), credit_score INT DEFAULT NULL, overall_result ENUM('approved','conditional','denied','pending') DEFAULT 'pending', criminal_record ENUM('clear','minor','disqualifying') DEFAULT 'clear', eviction_history ENUM('none','dismissed','found') DEFAULT 'none', notes TEXT, visible_to_tenant BOOLEAN DEFAULT FALSE, completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_by INT, FOREIGN KEY (tenant_id) REFERENCES users(id), FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL)`).catch(e => console.error('BG table error:', e.message));
 
-// Add renters_insurance column if it doesn't exist yet
-pool.query(`ALTER TABLE applications ADD COLUMN IF NOT EXISTS renters_insurance VARCHAR(50) DEFAULT 'not_answered'`).catch(()=>{});
+// FIXED: Safe, version-independent migration for renters_insurance.
+// Checks information_schema first instead of relying on "ADD COLUMN IF NOT EXISTS",
+// which is not supported on all MySQL versions and was silently failing before.
+async function migrateApplicationsTable() {
+  try {
+    const [cols] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'applications' AND COLUMN_NAME = 'renters_insurance'`
+    );
+    if (cols.length === 0) {
+      await pool.query(`ALTER TABLE applications ADD COLUMN renters_insurance VARCHAR(50) DEFAULT 'not_answered'`);
+      console.log('Added renters_insurance column to applications table');
+    } else {
+      console.log('renters_insurance column already exists on applications table');
+    }
+  } catch (e) {
+    console.error('renters_insurance migration failed:', e.message);
+  }
+}
+migrateApplicationsTable();
 
 app.get('/api/background/all', authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -1466,5 +1475,5 @@ app.post('/api/sms/send', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('🏢 Harborview running on port ' + PORT));
+app.listen(PORT, () => console.log('Harborview running on port ' + PORT));
 module.exports = app;
