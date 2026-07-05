@@ -132,9 +132,8 @@ app.get('/api/units/:id', async (req, res) => {
     if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
-    // FIX: cap photos at 24 — units with 40-60+ photos stored as base64 were producing
-    // multi-hundred-MB responses that hung the listing page indefinitely (unit #1 / $3750 had 59)
-    const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC LIMIT 24', [req.params.id]);
+    // FIX: cap photos at 8 — 24 was still ~19s due to large base64 payloads (unit #1 / $3750 had 59 photos)
+    const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC LIMIT 8', [req.params.id]);
     const [[photoTotal]] = await pool.query('SELECT COUNT(*) as total FROM unit_photos WHERE unit_id=?', [req.params.id]);
     const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
     res.json({ success: true, unit, photos, photo_total: photoTotal.total, reviews });
