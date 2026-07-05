@@ -132,11 +132,28 @@ app.get('/api/units/:id', async (req, res) => {
     if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
-    // FIX: cap photos at 8 — 24 was still ~19s due to large base64 payloads (unit #1 / $3750 had 59 photos)
-    const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC LIMIT 8', [req.params.id]);
+    // FIX: send first 8 photos fast; remaining photos are fetched on demand via
+    // GET /api/units/:id/photos?offset=&limit= (see below) so all photos stay reachable
+    // without one giant slow response (unit #1 / $3750 had 59 photos)
+    const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC, id ASC LIMIT 8', [req.params.id]);
     const [[photoTotal]] = await pool.query('SELECT COUNT(*) as total FROM unit_photos WHERE unit_id=?', [req.params.id]);
     const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
     res.json({ success: true, unit, photos, photo_total: photoTotal.total, reviews });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// FIX: paginated photo fetch so galleries with many photos (e.g. 59) load in fast batches
+// instead of one giant response. Frontend calls this with increasing offsets on "Load more".
+app.get('/api/units/:id/photos', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 12, 20);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const [photos] = await pool.query(
+      'SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC, id ASC LIMIT ? OFFSET ?',
+      [req.params.id, limit, offset]
+    );
+    const [[photoTotal]] = await pool.query('SELECT COUNT(*) as total FROM unit_photos WHERE unit_id=?', [req.params.id]);
+    res.json({ success: true, photos, total: photoTotal.total, offset, limit });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 app.post('/api/units', authMiddleware, adminOnly, async (req, res) => {
