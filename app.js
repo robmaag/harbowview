@@ -8,6 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const sharp = require('sharp');
 const evaluationsRouter = require('./routes/evaluations');
 
 const app = express();
@@ -155,6 +156,37 @@ app.get('/api/units/:id/photos', async (req, res) => {
     res.json({ success: true, photos, total: photoTotal.total, offset, limit });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+
+// FIX: one-time (repeatable/safe) cleanup for photos already stored uncompressed (6-8MB+ each).
+// Re-compresses any photo over ~700KB down to 1600px-wide JPEG @ quality 80. Safe to run
+// multiple times — already-compressed photos will be under the threshold and get skipped.
+app.post('/api/admin/compress-photos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const thresholdBytes = 700 * 1024; // ~700KB raw; base64 text is ~1.37x that
+    const [rows] = await pool.query(
+      'SELECT id, unit_id, filepath FROM unit_photos WHERE LENGTH(filepath) > ?',
+      [thresholdBytes * 1.37]
+    );
+    let compressed = 0, failed = 0, savedBytes = 0;
+    for (const row of rows) {
+      try {
+        const match = row.filepath.match(/^data:(.+);base64,(.+)$/);
+        if (!match) { failed++; continue; }
+        const originalBuffer = Buffer.from(match[2], 'base64');
+        const originalSize = originalBuffer.length;
+        const resizedBuffer = await sharp(originalBuffer).rotate().resize({ width: 1600, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+        const newDataUrl = `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`;
+        await pool.query('UPDATE unit_photos SET filepath=?, photo_data=? WHERE id=?', [newDataUrl, resizedBuffer, row.id]);
+        savedBytes += Math.max(0, originalSize - resizedBuffer.length);
+        compressed++;
+      } catch (e) {
+        console.error(`Photo ${row.id} compression failed:`, e.message);
+        failed++;
+      }
+    }
+    res.json({ success: true, compressed, failed, checked: rows.length, saved_mb: (savedBytes / (1024 * 1024)).toFixed(1) });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 app.post('/api/units', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { unit_number, floor, monthly_rent, bedrooms, bathrooms, sq_ft, status, description, amenities } = req.body;
@@ -192,13 +224,22 @@ app.post('/api/units/:id/photos', authMiddleware, adminOnly, upload.array('photo
     for (let i = 0; i < req.files.length; i++) {
       const f = req.files[i];
       const isPrimary = (!hasExisting && i === 0) ? 1 : 0;
-      const fileData = fs.readFileSync(f.path);
-      const base64Data = fileData.toString('base64');
-      const mimeType = f.mimetype;
+      // FIX: resize/compress every photo before storing — uncompressed camera photos (6-8MB each)
+      // were causing listing pages to hang. Cap at 1600px wide, JPEG quality 80.
+      let finalBuffer, mimeType;
+      try {
+        finalBuffer = await sharp(f.path).rotate().resize({ width: 1600, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+        mimeType = 'image/jpeg';
+      } catch (compressErr) {
+        console.error(`Photo compression failed for ${f.filename}, storing original:`, compressErr.message);
+        finalBuffer = fs.readFileSync(f.path);
+        mimeType = f.mimetype;
+      }
+      const base64Data = finalBuffer.toString('base64');
       const dataUrl = `data:${mimeType};base64,${base64Data}`;
       await pool.query(
         'INSERT INTO unit_photos (unit_id, filename, filepath, caption, is_primary, photo_data) VALUES (?,?,?,?,?,?)',
-        [unitId, f.filename, dataUrl, req.body[`caption_${i}`] || null, isPrimary, fileData]
+        [unitId, f.filename, dataUrl, req.body[`caption_${i}`] || null, isPrimary, finalBuffer]
       );
       try { fs.unlinkSync(f.path); } catch {}
     }
