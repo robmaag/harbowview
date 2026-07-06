@@ -132,10 +132,9 @@ app.get('/api/units/:id', async (req, res) => {
     if (!rows.length) return res.status(404).json({ success: false, message: 'Unit not found' });
     const unit = rows[0];
     try { unit.amenities = JSON.parse(unit.amenities); } catch {}
-    // FIX: send first 8 photos fast; remaining photos are fetched on demand via
-    // GET /api/units/:id/photos?offset=&limit= (see below) so all photos stay reachable
-    // without one giant slow response (unit #1 / $3750 had 59 photos)
-    const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC, id ASC LIMIT 8', [req.params.id]);
+    // FIX: send first 12 photos fast (matches the 12-per-batch "Load more" size); remaining photos
+    // are fetched on demand via GET /api/units/:id/photos?offset=&limit= (see below)
+    const [photos] = await pool.query('SELECT id, unit_id, filename, filepath, caption, is_primary FROM unit_photos WHERE unit_id=? ORDER BY is_primary DESC, id ASC LIMIT 12', [req.params.id]);
     const [[photoTotal]] = await pool.query('SELECT COUNT(*) as total FROM unit_photos WHERE unit_id=?', [req.params.id]);
     const [reviews] = await pool.query('SELECT r.*, u.first_name, u.last_name FROM unit_reviews r JOIN users u ON r.tenant_id=u.id WHERE r.unit_id=? ORDER BY r.created_at DESC', [req.params.id]);
     res.json({ success: true, unit, photos, photo_total: photoTotal.total, reviews });
@@ -279,17 +278,31 @@ app.get('/api/tours', authMiddleware, async (req, res) => {
 });
 
 async function migrateTourRequests(){
-  const migrations=[
-    `ALTER TABLE tour_requests MODIFY COLUMN unit_id INT NULL`,
-    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS name VARCHAR(255)`,
-    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
-    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS phone VARCHAR(50)`,
-    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS preferred_time VARCHAR(50)`,
-    `ALTER TABLE tour_requests ADD COLUMN IF NOT EXISTS admin_notes TEXT`,
-    `ALTER TABLE tour_requests MODIFY COLUMN IF EXISTS status VARCHAR(50) DEFAULT 'pending'`
-  ];
-  for(const sql of migrations){
-    await pool.query(sql).catch(e=>console.log('Tour migration skipped:',e.message));
+  try {
+    await pool.query(`ALTER TABLE tour_requests MODIFY COLUMN unit_id INT NULL`).catch(e=>console.log('tour_requests unit_id nullable check skipped:',e.message));
+
+    const columnsToAdd = [
+      { name: 'name', def: 'VARCHAR(255)' },
+      { name: 'email', def: 'VARCHAR(255)' },
+      { name: 'phone', def: 'VARCHAR(50)' },
+      { name: 'preferred_time', def: 'VARCHAR(50)' },
+      { name: 'admin_notes', def: 'TEXT' },
+      { name: 'status', def: "VARCHAR(50) DEFAULT 'pending'" }
+    ];
+
+    const [existingCols] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tour_requests'`
+    );
+    const existingNames = new Set(existingCols.map(c => c.COLUMN_NAME));
+
+    for (const col of columnsToAdd) {
+      if (!existingNames.has(col.name)) {
+        await pool.query(`ALTER TABLE tour_requests ADD COLUMN ${col.name} ${col.def}`);
+        console.log(`Added ${col.name} column to tour_requests table`);
+      }
+    }
+  } catch (e) {
+    console.error('tour_requests migration failed:', e.message);
   }
 }
 migrateTourRequests();
